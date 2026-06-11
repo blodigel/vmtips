@@ -73,7 +73,7 @@ Byt ut `kallesundvall` mot ditt GitHub-användarnamn.
 ## Tips för användning
 
 - Byt användare uppe till höger för att lägga tips åt rätt person.
-- Mata in resultat i "Hantera resultat & matcher"-sektionen när en match är klar.
+- Mata in resultat manuellt eller klicka på **"Synka resultat från API (öppen källa)"** i admin-sektionen. Den hämtar automatiskt färdiga resultat från en gratis öppen datakälla (openfootball/worldcup.json) och uppdaterar poängen direkt.
 - När ni sätter "riktig turneringsvinnare" får den som tippade rätt automatiskt 12 poäng.
 - Alla matcher ni lägger till sparas permanent i SQLite-filen på volymen.
 

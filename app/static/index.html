@@ -182,6 +182,8 @@
               <div class="text-right text-xs leading-tight min-w-[92px]">
                 <div class="text-slate-400">Matcher</div>
                 <div class="font-semibold text-lg text-emerald-700 points" x-text="entry.match_points"></div>
+                <div class="text-slate-400 mt-1">Grupper</div>
+                <div class="font-semibold text-lg text-blue-700 points" x-text="entry.group_points"></div>
                 <div class="text-slate-400 mt-1">Exakt score</div>
                 <div class="font-semibold text-lg text-emerald-700 points" x-text="entry.score_bonus"></div>
               </div>
@@ -191,9 +193,7 @@
         
         <div class="px-6 py-3 bg-slate-50 text-xs flex items-center gap-2 text-slate-500 border-t">
           <i class="fa-solid fa-info-circle"></i>
-          <span>3 poäng för rätt vinnare + 2 bonus för exakt mål</span>
-          <span class="mx-1">•</span>
-          <span x-text="'Turneringsvinnare ger ' + (settings.actual_champion ? '12' : '0') + ' poäng'"></span>
+          <span>3p rätt vinnare + 2p exakt mål • 5p rätt gruppvinnare • 12p turneringsvinnare</span>
         </div>
       </div>
 
@@ -250,6 +250,43 @@
           </div>
           <div class="text-[11px] text-slate-400 mt-1">Klicka på ett lag ovan eller skriv in och spara.</div>
         </div>
+      </div>
+
+      <!-- GRUPPVINNARE -->
+      <div class="bg-white rounded-3xl shadow-sm border p-6">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <span class="font-semibold text-xl">Gruppvinnare</span>
+            <span class="ml-2 text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">5 poäng per rätt</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <template x-for="g in groupsData" :key="g.group">
+            <div class="border rounded-2xl p-4">
+              <div class="font-semibold mb-2 flex items-center gap-x-2">
+                Grupp <span x-text="g.group"></span>
+                <span x-show="g.actual_winner" class="ml-auto text-[10px] px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded">Rätt: <span x-text="g.actual_winner"></span></span>
+              </div>
+              
+              <div class="grid grid-cols-2 gap-2">
+                <template x-for="team in g.teams" :key="team">
+                  <button @click="pickGroupWinner(g.group, team)"
+                          class="px-3 py-2 text-sm rounded-2xl border text-left active:scale-[0.985] transition"
+                          :class="g.predictions[currentUser] === team ? 'border-blue-500 bg-blue-50 font-semibold' : 'hover:bg-slate-50 border-slate-200'">
+                    <span x-text="team"></span>
+                  </button>
+                </template>
+              </div>
+
+              <div class="mt-3 text-xs text-slate-500 space-y-0.5">
+                <div>Lillen: <span class="font-medium text-slate-700" x-text="g.predictions.Lillen || '–'"></span></div>
+                <div>Stinis: <span class="font-medium text-slate-700" x-text="g.predictions.Stinis || '–'"></span></div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="text-xs text-slate-400 mt-3">Klicka på ett lag för att tippa som gruppvinnare (1:a plats). Poäng delas ut när ni sätter faktisk vinnare i admin.</div>
       </div>
 
       <!-- DAGENS & MATCHER -->
@@ -413,9 +450,18 @@
             </div>
           </div>
 
-          <!-- Enter results -->
+          <!-- Enter results + auto sync -->
           <div>
-            <div class="text-sm font-medium mb-2">Mata in resultat (när matchen är klar)</div>
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-sm font-medium">Mata in resultat eller synka automatiskt</div>
+              <button @click="syncResults()" 
+                      class="text-xs px-4 py-1.5 rounded-2xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium flex items-center gap-x-2">
+                <i class="fa-solid fa-sync"></i>
+                <span>Synka resultat från API (öppen källa)</span>
+              </button>
+            </div>
+            <div class="text-xs text-slate-500 mb-3">Klickar du på Synka så hämtas färdiga resultat automatiskt från en gratis öppen datakälla (openfootball). Perfekt för att slippa mata in för hand varje dag.</div>
+
             <div class="space-y-2">
               <template x-for="match in matches" :key="'res-'+match.id">
                 <div class="flex items-center gap-3 border rounded-2xl px-4 py-3 text-sm">
@@ -444,7 +490,7 @@
                 </div>
               </template>
             </div>
-            <div class="text-xs text-slate-400 mt-2">När du sparar resultat räknas poängen om direkt för båda.</div>
+            <div class="text-xs text-slate-400 mt-2">Synka-knappen uppdaterar poängen automatiskt för alla matchade avslutade matcher.</div>
           </div>
 
           <!-- Set tournament winner -->
@@ -456,6 +502,26 @@
               <button @click="clearActualChampion()" class="px-4 text-xs text-slate-500">Rensa</button>
             </div>
             <div x-show="settings.actual_champion" class="text-emerald-600 text-xs mt-1.5">Aktuell officiell vinnare: <span class="font-semibold" x-text="settings.actual_champion"></span></div>
+          </div>
+
+          <!-- Set group winners -->
+          <div class="border-t pt-5 mt-4">
+            <div class="text-sm font-medium mb-2">Sätt faktiska gruppvinnare (efter gruppspelet)</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2 text-sm">
+              <template x-for="g in groupsData" :key="'set-'+g.group">
+                <div class="flex items-center gap-2">
+                  <span class="w-10 text-slate-500">Gr. <span x-text="g.group"></span></span>
+                  <select :value="g.actual_winner || ''" @change="setActualGroupWinner(g.group, $event.target.value)" 
+                          class="flex-1 border rounded-2xl px-2 py-1 text-sm bg-white">
+                    <option value="">– ingen –</option>
+                    <template x-for="t in g.teams" :key="t">
+                      <option :value="t" x-text="t"></option>
+                    </template>
+                  </select>
+                </div>
+              </template>
+            </div>
+            <div class="text-xs text-slate-400 mt-1">När du sätter en gruppvinnare får den som tippat rätt +5 poäng.</div>
           </div>
         </div>
       </div>
@@ -476,6 +542,7 @@
         leaderboard: [],
         tournamentPicks: {},
         settings: { actual_champion: null },
+        groupsData: [],
         filter: 'all',
         showAdmin: false,
         showChampionPicker: false,
@@ -518,7 +585,8 @@
             this.fetchMatches(),
             this.fetchLeaderboard(),
             this.fetchTournamentPicks(),
-            this.fetchSettings()
+            this.fetchSettings(),
+            this.fetchGroups()
           ])
         },
 
@@ -557,6 +625,14 @@
             const r = await fetch('/api/settings')
             this.settings = await r.json()
             this.actualChampionInput = this.settings.actual_champion || ''
+          } catch (e) {}
+        },
+
+        async fetchGroups() {
+          try {
+            const r = await fetch('/api/groups')
+            const data = await r.json()
+            this.groupsData = data.groups || []
           } catch (e) {}
         },
 
@@ -731,6 +807,43 @@
           try {
             await fetch('/api/set-champion?champion=', { method: 'POST' })
             await this.refreshAll()
+          } catch (e) {}
+        },
+
+        async syncResults() {
+          if (!confirm('Hämta senaste matchresultat från öppen datakälla och uppdatera poäng?')) return
+          try {
+            const res = await fetch('/api/sync-results', { method: 'POST' })
+            const data = await res.json()
+            alert(data.message || `Uppdaterade ${data.updated_matches} matcher`)
+            await this.refreshAll()
+          } catch (e) {
+            alert('Kunde inte synka resultat just nu. Kolla internetanslutning eller försök igen senare.')
+          }
+        },
+
+        async pickGroupWinner(group, team) {
+          try {
+            await fetch('/api/group-prediction', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ user: this.currentUser, group, winner: team })
+            })
+            await this.fetchGroups()
+            await this.fetchLeaderboard()
+          } catch (e) {}
+        },
+
+        async setActualGroupWinner(group, winner) {
+          if (!winner) return
+          try {
+            await fetch('/api/set-group-winner', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ group, winner })
+            })
+            await this.fetchGroups()
+            await this.fetchLeaderboard()
           } catch (e) {}
         }
       }

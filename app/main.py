@@ -11,6 +11,7 @@ from datetime import datetime, date
 from pathlib import Path
 from typing import Optional, List
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +23,22 @@ DB_PATH = Path(os.environ.get("DB_PATH", "/data/vmtips.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 USERS = ["Lillen", "Stinis"]
 STATIC_DIR = Path(__file__).parent / "static"
+
+# 12 groups for VM 2026 (approximate based on draw - easy to extend)
+GROUPS = [
+    {"group": "A", "teams": ["Mexico", "South Africa", "South Korea", "Czechia"]},
+    {"group": "B", "teams": ["Canada", "Bosnia and Herzegovina", "Qatar", "Switzerland"]},
+    {"group": "C", "teams": ["Brazil", "Morocco", "Haiti", "Scotland"]},
+    {"group": "D", "teams": ["USA", "Paraguay", "Australia", "Türkiye"]},
+    {"group": "E", "teams": ["Germany", "Curaçao", "Elfenbenskusten", "Ecuador"]},
+    {"group": "F", "teams": ["Netherlands", "Japan", "Tunisia", "Sweden"]},
+    {"group": "G", "teams": ["Belgium", "Egypt", "Ghana", "Panama"]},
+    {"group": "H", "teams": ["Spain", "Cape Verde", "Saudi Arabia", "Uruguay"]},
+    {"group": "I", "teams": ["Argentina", "Algeria", "Iraq", "Norway"]},
+    {"group": "J", "teams": ["France", "Senegal", "Austria", "Jordan"]},
+    {"group": "K", "teams": ["England", "Croatia", "Portugal", "Colombia"]},
+    {"group": "L", "teams": ["Italy", "Denmark", "Poland", "Serbia"]},
+]
 
 app = FastAPI(title="VM-Tips 2026", version="1.0")
 
@@ -110,6 +127,22 @@ def init_db():
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS group_predictions (
+            user TEXT NOT NULL,
+            group_name TEXT NOT NULL,
+            winner TEXT NOT NULL,
+            UNIQUE(user, group_name)
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS group_winners (
+            group_name TEXT PRIMARY KEY,
+            winner TEXT NOT NULL
         )
     """)
 
@@ -202,6 +235,129 @@ def calculate_points(pred_h: int, pred_a: int, act_h: int, act_a: int) -> int:
     if pred_h == act_h and pred_a == act_a:
         points += 2
     return points
+
+
+TEAM_ALIASES = {
+    # English variations -> our preferred (or common in our DB)
+    "south korea": "south korea",
+    "korea republic": "south korea",
+    "czech republic": "czechia",
+    "czechia": "czechia",
+    "bosnia-herzegovina": "bosnia and herzegovina",
+    "bosnia and herzegovina": "bosnia and herzegovina",
+    "türkiye": "türkiye",
+    "turkey": "türkiye",
+    "côte d'ivoire": "elfenbenskusten",
+    "ivory coast": "elfenbenskusten",
+    "cape verde": "kap verde",
+    "cabo verde": "kap verde",
+    "netherlands": "nederländerna",
+    "sweden": "sverige",
+    "tunisia": "tunisien",
+    "japan": "japan",
+    "spain": "spanien",
+    "germany": "tyskland",
+    "morocco": "marocko",
+    "brazil": "brasilien",
+    "argentina": "argentina",
+    "france": "frankrike",
+    "england": "england",
+    "portugal": "portugal",
+    "belgium": "belgien",
+    "croatia": "kroatien",
+    "uruguay": "uruguay",
+    "paraguay": "paraguay",
+    "mexico": "mexico",
+    "usa": "usa",
+    "united states": "usa",
+    "canada": "canada",
+    "australia": "australien",
+    "saudi arabia": "saudi arabia",
+    "qatar": "qatar",
+    "iran": "iran",
+    "iraq": "iraq",
+    "algeria": "algeriet",
+    "senegal": "senegal",
+    "egypt": "egypten",
+    "ghana": "ghana",
+    # Swedish names from our seed
+    "sverige": "sverige",
+    "tunisien": "tunisien",
+    "nederländerna": "nederländerna",
+    "elfenbenskusten": "elfenbenskusten",
+    "kap verde": "kap verde",
+}
+
+def normalize_team(name: str) -> str:
+    if not name:
+        return ""
+    key = name.lower().strip()
+    return TEAM_ALIASES.get(key, key)
+
+
+async def sync_results_from_openfootball() -> int:
+    """Hämtar resultat från openfootball/worldcup.json (gratis, ingen nyckel behövs)
+    och uppdaterar lokala matcher som är klara."""
+    url = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
+    updated = 0
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        print(f"Failed to fetch openfootball data: {e}")
+        return 0
+
+    remote_matches = data.get("matches", [])
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    for r in remote_matches:
+        # Only process finished matches that have scores
+        score1 = r.get("score1")
+        score2 = r.get("score2")
+        if score1 is None or score2 is None:
+            continue
+
+        r_date = r.get("date", "")
+        t1 = normalize_team(r.get("team1", ""))
+        t2 = normalize_team(r.get("team2", ""))
+
+        # Find matching local match by date and normalized team names
+        # Our datetimes start with YYYY-MM-DD
+        cur.execute("""
+            SELECT id, home, away FROM matches
+            WHERE datetime LIKE ? || '%'
+        """, (r_date,))
+        candidates = cur.fetchall()
+
+        for cand in candidates:
+            local_id, home, away = cand["id"], cand["home"], cand["away"]
+            l1 = normalize_team(home)
+            l2 = normalize_team(away)
+
+            if (l1 == t1 and l2 == t2) or (l1 == t2 and l2 == t1):
+                # Check if we already have this result
+                cur2 = conn.cursor()
+                cur2.execute("SELECT home_goals, away_goals FROM match_results WHERE match_id = ?", (local_id,))
+                existing = cur2.fetchone()
+
+                new_h, new_a = int(score1), int(score2)
+
+                if not existing or (existing["home_goals"] != new_h or existing["away_goals"] != new_a):
+                    cur2.execute(
+                        "INSERT OR REPLACE INTO match_results (match_id, home_goals, away_goals) VALUES (?, ?, ?)",
+                        (local_id, new_h, new_a)
+                    )
+                    updated += 1
+                break
+
+    conn.commit()
+    conn.close()
+    return updated
 
 # --- API routes ---
 
@@ -326,7 +482,7 @@ def get_leaderboard():
     """)
     finished = cur.fetchall()
 
-    scores = {u: {"total": 0, "match_points": 0, "score_bonus": 0, "correct_picks": 0} for u in USERS}
+    scores = {u: {"total": 0, "match_points": 0, "score_bonus": 0, "correct_picks": 0, "group_points": 0} for u in USERS}
 
     for row in finished:
         mid = row["id"]
@@ -348,9 +504,27 @@ def get_leaderboard():
                 if pts == 5:
                     scores[user]["score_bonus"] += 2
 
+    # Group winner points (5p per correct group)
+    GROUP_POINTS = 5
+    for group in GROUPS:
+        gname = group["group"]
+        cur.execute("SELECT winner FROM group_winners WHERE group_name = ?", (gname,))
+        actual = cur.fetchone()
+        if actual:
+            actual_winner = actual["winner"]
+            for user in USERS:
+                cur.execute(
+                    "SELECT winner FROM group_predictions WHERE user=? AND group_name=?",
+                    (user, gname)
+                )
+                pick = cur.fetchone()
+                if pick and pick["winner"] == actual_winner:
+                    scores[user]["total"] += GROUP_POINTS
+                    scores[user]["group_points"] += GROUP_POINTS
+
     # Champion points (if set)
     actual_champion = get_setting("actual_champion")
-    champion_points = 12  # nice round number for the big prize
+    champion_points = 12
 
     if actual_champion:
         for user in USERS:
@@ -365,7 +539,7 @@ def get_leaderboard():
         for user in USERS:
             scores[user]["champion_points"] = 0
 
-    # Add current picks for display
+    # Current picks
     picks = {}
     for user in USERS:
         cur.execute("SELECT champion FROM tournament_picks WHERE user = ?", (user,))
@@ -382,17 +556,18 @@ def get_leaderboard():
             "total": s["total"],
             "match_points": s.get("match_points", 0),
             "score_bonus": s.get("score_bonus", 0),
+            "group_points": s.get("group_points", 0),
             "champion_points": s.get("champion_points", 0),
             "correct_picks": s.get("correct_picks", 0),
             "champion_pick": picks[user]
         })
 
-    # Sort by total desc
     leaderboard.sort(key=lambda x: x["total"], reverse=True)
     return {
         "leaderboard": leaderboard,
         "actual_champion": actual_champion,
-        "champion_points_value": champion_points if actual_champion else 0
+        "champion_points_value": champion_points if actual_champion else 0,
+        "group_points_value": 5
     }
 
 @app.post("/api/tournament-pick")
@@ -425,6 +600,88 @@ def set_actual_champion(champion: str):
     """Sätt den riktiga turneringsvinnaren (när VM är slut). Ger poäng automatiskt."""
     set_setting("actual_champion", champion)
     return {"ok": True, "actual_champion": champion}
+
+
+@app.post("/api/sync-results")
+async def sync_results():
+    """Hämtar och applicerar senaste resultat från öppen datakälla (openfootball/worldcup.json).
+    Uppdaterar poäng automatiskt för matchade avslutade matcher."""
+    count = await sync_results_from_openfootball()
+    return {
+        "ok": True,
+        "updated_matches": count,
+        "message": f"Uppdaterade {count} matchresultat från öppen källa."
+    }
+
+
+@app.get("/api/groups")
+def get_groups():
+    """Return groups with teams, current predictions for both users, and actual winners if set."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    result = []
+    for g in GROUPS:
+        gname = g["group"]
+        teams = g["teams"]
+
+        preds = {}
+        for user in USERS:
+            cur.execute(
+                "SELECT winner FROM group_predictions WHERE user=? AND group_name=?",
+                (user, gname)
+            )
+            row = cur.fetchone()
+            preds[user] = row["winner"] if row else None
+
+        cur.execute("SELECT winner FROM group_winners WHERE group_name=?", (gname,))
+        actual = cur.fetchone()
+        actual_winner = actual["winner"] if actual else None
+
+        result.append({
+            "group": gname,
+            "teams": teams,
+            "predictions": preds,
+            "actual_winner": actual_winner
+        })
+
+    conn.close()
+    return {"groups": result, "group_points": 5}
+
+
+@app.post("/api/group-prediction")
+def save_group_prediction(data: dict):
+    user = data.get("user")
+    group = data.get("group")
+    winner = data.get("winner")
+    if user not in USERS or not group or not winner:
+        raise HTTPException(400, "Ogiltig data")
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT OR REPLACE INTO group_predictions (user, group_name, winner) VALUES (?, ?, ?)",
+        (user, group, winner)
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/set-group-winner")
+def set_group_winner(data: dict):
+    group = data.get("group")
+    winner = data.get("winner")
+    if not group or not winner:
+        raise HTTPException(400, "Ogiltig data")
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT OR REPLACE INTO group_winners (group_name, winner) VALUES (?, ?)",
+        (group, winner)
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 @app.get("/api/settings")
 def get_settings():
