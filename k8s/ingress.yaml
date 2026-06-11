@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vmtips
+  annotations:
+    # Använd Traefik's web entrypoint (HTTP på port 80)
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    # Om du senare vill ha HTTPS:
+    # traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  rules:
+    # Catch-all regel (ingen host) – bra för rent LAN-användning
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vmtips
+                port:
+                  number: 80
+EOF
