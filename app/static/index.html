@@ -336,13 +336,13 @@
                 <!-- Result or Prediction area -->
                 <div class="sm:w-[340px] w-full">
                   <!-- FINISHED -->
-                  <div x-show="match.result" class="flex items-center gap-4">
+                  <div x-show="match.status === 'finished'" class="flex items-center gap-4">
                     <div class="flex-1">
-                      <div class="uppercase tracking-widest text-xs text-emerald-600 font-semibold mb-px">RESULTAT</div>
+                      <div class="uppercase tracking-widest text-xs text-emerald-600 font-semibold mb-px">SLUTRESULTAT</div>
                       <div class="flex items-baseline gap-x-2">
-                        <span class="text-4xl font-semibold tabular-nums" x-text="match.result.home_goals"></span>
+                        <span class="text-4xl font-semibold tabular-nums" x-text="match.result ? match.result.home_goals : 0"></span>
                         <span class="text-2xl text-slate-400">-</span>
-                        <span class="text-4xl font-semibold tabular-nums" x-text="match.result.away_goals"></span>
+                        <span class="text-4xl font-semibold tabular-nums" x-text="match.result ? match.result.away_goals : 0"></span>
                       </div>
                     </div>
                     
@@ -361,9 +361,38 @@
                     </div>
                   </div>
 
-                  <!-- OPEN FOR BETTING -->
-                  <div x-show="!match.result" class="space-y-2.5">
-                    <div class="flex gap-1.5">
+                  <!-- LIVE -->
+                  <div x-show="match.status === 'live'" class="space-y-2">
+                    <div>
+                      <div class="flex items-center gap-x-2">
+                        <span class="px-2 py-0.5 text-xs font-bold bg-red-600 text-white rounded">LIVE</span>
+                        <span class="text-xs text-slate-500">Pågående match</span>
+                      </div>
+                      <div class="flex items-baseline gap-x-2 mt-1">
+                        <span class="text-4xl font-semibold tabular-nums" x-text="match.result ? match.result.home_goals : 0"></span>
+                        <span class="text-2xl text-slate-400">-</span>
+                        <span class="text-4xl font-semibold tabular-nums" x-text="match.result ? match.result.away_goals : 0"></span>
+                      </div>
+                    </div>
+
+                    <div class="text-xs text-slate-500">
+                      Ditt tips: 
+                      <template x-if="match.predictions && match.predictions[currentUser]">
+                        <span class="font-medium text-slate-700" x-text="match.predictions[currentUser].home_goals + '–' + match.predictions[currentUser].away_goals"></span>
+                      </template>
+                      <template x-if="!(match.predictions && match.predictions[currentUser])">
+                        <span class="text-slate-400">–</span>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- UPCOMING / BETTING -->
+                  <div x-show="match.status === 'upcoming'" class="space-y-2.5">
+                    <div x-show="match.prediction_locked" class="text-xs text-amber-600 font-medium">
+                      Tippning stängd – matchen har startat
+                    </div>
+
+                    <div class="flex gap-1.5" :class="match.prediction_locked ? 'opacity-50 pointer-events-none' : ''">
                       <!-- Winner quick picks -->
                       <button @click="quickPickWinner(match, 'home')" 
                               class="team-btn flex-1 border text-sm font-medium py-[9px] px-3 rounded-2xl"
@@ -382,7 +411,7 @@
                       </button>
                     </div>
 
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-2" :class="match.prediction_locked ? 'opacity-50 pointer-events-none' : ''">
                       <div class="flex-1">
                         <div class="text-[10px] text-slate-500 mb-1 font-medium pl-1">Ditt tips</div>
                         <div class="flex items-center gap-2">
@@ -399,7 +428,8 @@
                       </div>
                       
                       <button @click="savePrediction(match)"
-                              class="mt-5 self-end bg-emerald-600 active:bg-emerald-700 transition text-white font-semibold px-6 h-11 rounded-2xl text-sm flex items-center gap-x-2">
+                              class="mt-5 self-end bg-emerald-600 active:bg-emerald-700 transition text-white font-semibold px-6 h-11 rounded-2xl text-sm flex items-center gap-x-2"
+                              :disabled="match.prediction_locked">
                         <i class="fa-solid fa-save"></i>
                         <span>Spara</span>
                       </button>
@@ -477,9 +507,13 @@
                     <input type="number" min="0" class="w-11 text-center border rounded-2xl py-1" :value="match.result ? match.result.away_goals : ''"
                            @input="tempResult[match.id] = {...(tempResult[match.id]||{}), away: parseInt($event.target.value)}">
                     
-                    <button @click="saveResult(match)" 
-                            class="ml-1 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 transition text-white px-4 rounded-2xl h-8">
-                      Spara resultat
+                    <button @click="saveResult(match, false)" 
+                            class="ml-1 text-xs font-medium bg-amber-600 hover:bg-amber-700 active:bg-amber-800 transition text-white px-3 rounded-2xl h-8">
+                      Live
+                    </button>
+                    <button @click="saveResult(match, true)" 
+                            class="ml-1 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 transition text-white px-3 rounded-2xl h-8">
+                      Slutgiltigt
                     </button>
                     
                     <button @click="deleteMatch(match)" 
@@ -569,6 +603,20 @@
             this.fetchLeaderboard()
             this.fetchMatches()
           }, 25000)
+
+          // Auto-sync results more frequently when there might be live matches (every 20s)
+          setInterval(() => {
+            const hasLiveOrToday = this.matches.some(m => 
+              m.status === 'live' || 
+              (m.status === 'upcoming' && new Date(m.datetime) < new Date(Date.now() + 3*60*60*1000))
+            )
+            if (hasLiveOrToday) {
+              fetch('/api/sync-results', { method: 'POST' }).then(() => {
+                this.fetchMatches()
+                this.fetchLeaderboard()
+              }).catch(() => {})
+            }
+          }, 20000)
         },
 
         switchUser(user) {
@@ -725,7 +773,7 @@
         },
 
         getMatchPoints(match, user) {
-          if (!match.result || !match.predictions || !match.predictions[user]) return 0
+          if (!match.result || !match.result.is_final || !match.predictions || !match.predictions[user]) return 0
           const p = match.predictions[user]
           const r = match.result
           // replicate backend logic client side for display
@@ -753,14 +801,15 @@
           } catch (e) { alert('Kunde inte lägga till match') }
         },
 
-        async saveResult(match) {
+        async saveResult(match, isFinal = true) {
           const tr = this.tempResult[match.id]
           if (!tr || tr.home === undefined || tr.away === undefined) {
             alert('Ange både hemmamål och borta mål')
             return
           }
           try {
-            await fetch(`/api/matches/${match.id}/result`, {
+            const url = `/api/matches/${match.id}/result?is_final=${isFinal}`
+            await fetch(url, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ home_goals: tr.home, away_goals: tr.away })

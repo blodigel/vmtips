@@ -7,7 +7,7 @@ Kör på Raspberry Pi i Kubernetes internt på LAN.
 import sqlite3
 import json
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional, List
 
@@ -100,6 +100,7 @@ def init_db():
             match_id INTEGER PRIMARY KEY,
             home_goals INTEGER NOT NULL,
             away_goals INTEGER NOT NULL,
+            is_final INTEGER NOT NULL DEFAULT 1,
             FOREIGN KEY(match_id) REFERENCES matches(id) ON DELETE CASCADE
         )
     """)
@@ -349,7 +350,7 @@ async def sync_results_from_openfootball() -> int:
 
                 if not existing or (existing["home_goals"] != new_h or existing["away_goals"] != new_a):
                     cur2.execute(
-                        "INSERT OR REPLACE INTO match_results (match_id, home_goals, away_goals) VALUES (?, ?, ?)",
+                        "INSERT OR REPLACE INTO match_results (match_id, home_goals, away_goals, is_final) VALUES (?, ?, ?, 1)",
                         (local_id, new_h, new_a)
                     )
                     updated += 1
@@ -386,9 +387,16 @@ def get_matches():
         m = dict(row)
         # attach result if exists
         cur2 = conn.cursor()
-        cur2.execute("SELECT home_goals, away_goals FROM match_results WHERE match_id = ?", (m["id"],))
+        cur2.execute("SELECT home_goals, away_goals, is_final FROM match_results WHERE match_id = ?", (m["id"],))
         res = cur2.fetchone()
-        m["result"] = {"home_goals": res[0], "away_goals": res[1]} if res else None
+        if res:
+            m["result"] = {
+                "home_goals": res[0], 
+                "away_goals": res[1],
+                "is_final": bool(res[2])
+            }
+        else:
+            m["result"] = None
 
         # attach both users' predictions
         preds = {}
@@ -400,6 +408,32 @@ def get_matches():
             p = cur2.fetchone()
             preds[user] = {"home_goals": p[0], "away_goals": p[1]} if p else None
         m["predictions"] = preds
+
+        # Compute status and lock
+        try:
+            match_dt = datetime.fromisoformat(m["datetime"])
+            now = datetime.now()
+            lock_buffer = 5 * 60  # 5 minutes before kickoff predictions lock
+
+            if m["result"] and m["result"].get("is_final"):
+                m["status"] = "finished"
+                m["prediction_locked"] = True
+            elif now >= match_dt:
+                m["status"] = "live"
+                m["prediction_locked"] = True
+            elif now >= match_dt - timedelta(seconds=lock_buffer):
+                m["status"] = "upcoming"
+                m["prediction_locked"] = True
+            else:
+                m["status"] = "upcoming"
+                m["prediction_locked"] = False
+
+            # For live matches, we may have a provisional result (not final) for live score display
+            if m["status"] == "live" and m["result"] and not m["result"].get("is_final"):
+                m["live_score"] = m["result"]
+        except Exception:
+            m["status"] = "upcoming"
+            m["prediction_locked"] = False
 
         matches.append(m)
     conn.close()
@@ -428,24 +462,36 @@ def delete_match(match_id: int):
     return {"ok": True}
 
 @app.put("/api/matches/{match_id}/result")
-def set_result(match_id: int, res: ResultUpdate):
+def set_result(match_id: int, res: ResultUpdate, is_final: bool = True):
+    """Set result. Use is_final=false for live/provisional scores during the match."""
     conn = get_db()
     cur = conn.cursor()
-    # Upsert result
     cur.execute(
-        "INSERT OR REPLACE INTO match_results (match_id, home_goals, away_goals) VALUES (?, ?, ?)",
-        (match_id, res.home_goals, res.away_goals)
+        "INSERT OR REPLACE INTO match_results (match_id, home_goals, away_goals, is_final) VALUES (?, ?, ?, ?)",
+        (match_id, res.home_goals, res.away_goals, 1 if is_final else 0)
     )
     conn.commit()
     conn.close()
-    return {"ok": True, "match_id": match_id, "result": res.dict()}
+    return {"ok": True, "match_id": match_id, "result": {**res.dict(), "is_final": is_final}}
 
 @app.post("/api/predictions")
 def save_prediction(p: PredictionCreate):
     if p.user not in USERS:
         raise HTTPException(400, "Ogiltig användare")
+
+    # Check if predictions are locked for this match
     conn = get_db()
     cur = conn.cursor()
+    cur.execute("SELECT datetime FROM matches WHERE id = ?", (p.match_id,))
+    row = cur.fetchone()
+    if row:
+        try:
+            match_dt = datetime.fromisoformat(row["datetime"])
+            if datetime.now() >= match_dt:
+                raise HTTPException(403, "Tippning är stängd – matchen har startat")
+        except Exception:
+            pass
+
     cur.execute(
         """INSERT OR REPLACE INTO predictions 
            (user, match_id, home_goals, away_goals) 
@@ -473,12 +519,13 @@ def get_leaderboard():
     conn = get_db()
     cur = conn.cursor()
 
-    # Get all finished matches with results
+    # Get all finished matches with FINAL results
     cur.execute("""
         SELECT m.id, m.home, m.away, m.stage, m.datetime,
                r.home_goals as act_h, r.away_goals as act_a
         FROM matches m
         JOIN match_results r ON r.match_id = m.id
+        WHERE r.is_final = 1
     """)
     finished = cur.fetchall()
 
