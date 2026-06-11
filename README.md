@@ -89,3 +89,42 @@ Lycka till – må den bäste vinnaren (av bettingen) vinna! ⚽🏆
 ---
 
 Byggd för kul på LAN 2026.
+
+---
+
+## Första gången: Gör det till ett GitHub-repo (superenkelt)
+
+Du har **gh CLI** installerat och inloggat, så det är bara några kommandon.
+
+1. Se till att du är i rätt mapp:
+   ```bash
+   cd /Users/kallesundvall/Code/vmtips
+   ```
+
+2. Kör detta kommando (det skapar repo på GitHub + pushar allt):
+   ```bash
+   gh repo create --source=. --public --push
+   ```
+
+   - Det frågar troligen efter namn på repot. Skriv `vmtips` (rekommenderas) och tryck enter.
+   - Välj Public när den frågar.
+   - Den lägger automatiskt till remote och pushar.
+
+3. Gå till GitHub i webbläsaren:
+   - https://github.com/blodigel/vmtips (eller ditt valda namn)
+   - Gå till fliken **Actions** och se att builden startar.
+   - När den är klar → gå till **Packages** (eller "Releases" → Packages) för att se din image: `ghcr.io/blodigel/vmtips:latest`
+
+4. Uppdatera Kubernetes (om du inte använder exakt "vmtips" som repo-namn):
+   - Öppna `k8s/deployment.yaml`
+   - Ändra raden med `image:` så den matchar ditt repo.
+   - Committa och pusha igen:
+     ```bash
+     git add k8s/deployment.yaml
+     git commit -m "Uppdatera image-namn"
+     git push
+     ```
+
+Nu har du ett riktigt git-repo + CI som bygger och pushar imagen automatiskt varje gång du pushar kod.
+
+Om du får problem med något steg – kopiera felmeddelandet hit så hjälper jag direkt.
