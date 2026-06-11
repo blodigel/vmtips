@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: vmtips
-          image: ghcr.io/kallesundvall/vmtips:latest   # ÄNDRA TILL DIN IMAGE
+          image: ghcr.io/blodigel/vmtips:latest   # Ändra om du använder annat repo-namn än "vmtips"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
