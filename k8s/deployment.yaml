@@ -17,7 +17,7 @@ spec:
       containers:
         - name: vmtips
           image: ghcr.io/blodigel/vmtips:latest   # Ändra om du använder annat repo-namn än "vmtips"
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always  # Viktigt med :latest + GH Actions så att den alltid hämtar senaste bilden vid rollout
           ports:
             - containerPort: 8000
               name: http
