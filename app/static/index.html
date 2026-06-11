@@ -495,7 +495,10 @@
                 <span>Synka resultat från API (öppen källa)</span>
               </button>
             </div>
-            <div class="text-xs text-slate-500 mb-3">Klickar du på Synka så hämtas färdiga resultat automatiskt från en gratis öppen datakälla (openfootball). Perfekt för att slippa mata in för hand varje dag.</div>
+            <div class="text-xs text-slate-500 mb-3">
+              Bakgrunds-synk körs automatiskt var minut på servern och hämtar färdiga resultat från gratis öppen datakälla (openfootball/worldcup.json).<br>
+              Knappen "Synka" tvingar en omedelbar uppdatering. Du slipper mata in slutresultat manuellt – de dyker upp automatiskt när källan uppdateras.
+            </div>
 
             <div class="space-y-2">
               <template x-for="match in matches" :key="'res-'+match.id">

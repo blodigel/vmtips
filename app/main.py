@@ -7,6 +7,7 @@ Kör på Raspberry Pi i Kubernetes internt på LAN.
 import sqlite3
 import json
 import os
+import asyncio
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional, List
@@ -368,11 +369,28 @@ async def sync_results_from_openfootball() -> int:
     conn.close()
     return updated
 
+
+async def periodic_result_sync():
+    """Background task that automatically syncs results from the public source
+    every 60 seconds. This means final results will appear without you having
+    to manually click the sync button or enter anything."""
+    while True:
+        try:
+            count = await sync_results_from_openfootball()
+            if count > 0:
+                print(f"[AUTO-SYNC] Updated {count} match results from open source")
+        except Exception as e:
+            print(f"[AUTO-SYNC] Error: {e}")
+        await asyncio.sleep(60)  # every minute is plenty for this source
+
 # --- API routes ---
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     init_db()
+    # Start background task to automatically sync results from the open source
+    # This runs every 60 seconds so final results appear without manual intervention
+    asyncio.create_task(periodic_result_sync())
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
