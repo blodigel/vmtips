@@ -105,6 +105,14 @@ def init_db():
         )
     """)
 
+    # Migration for existing databases (before is_final column was added)
+    try:
+        cur.execute("SELECT is_final FROM match_results LIMIT 1")
+    except sqlite3.OperationalError:
+        print("Migrating match_results table: adding is_final column")
+        cur.execute("ALTER TABLE match_results ADD COLUMN is_final INTEGER NOT NULL DEFAULT 1")
+        conn.commit()
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS predictions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -385,18 +393,31 @@ def get_matches():
     matches = []
     for row in cur.fetchall():
         m = dict(row)
-        # attach result if exists
+        # attach result if exists (defensive for schema migration)
         cur2 = conn.cursor()
-        cur2.execute("SELECT home_goals, away_goals, is_final FROM match_results WHERE match_id = ?", (m["id"],))
-        res = cur2.fetchone()
-        if res:
-            m["result"] = {
-                "home_goals": res[0], 
-                "away_goals": res[1],
-                "is_final": bool(res[2])
-            }
-        else:
-            m["result"] = None
+        try:
+            cur2.execute("SELECT home_goals, away_goals, is_final FROM match_results WHERE match_id = ?", (m["id"],))
+            res = cur2.fetchone()
+            if res:
+                m["result"] = {
+                    "home_goals": res[0], 
+                    "away_goals": res[1],
+                    "is_final": bool(res[2])
+                }
+            else:
+                m["result"] = None
+        except sqlite3.OperationalError:
+            # Fallback if column still missing (should not happen after migration)
+            cur2.execute("SELECT home_goals, away_goals FROM match_results WHERE match_id = ?", (m["id"],))
+            res = cur2.fetchone()
+            if res:
+                m["result"] = {
+                    "home_goals": res[0], 
+                    "away_goals": res[1],
+                    "is_final": True
+                }
+            else:
+                m["result"] = None
 
         # attach both users' predictions
         preds = {}
