@@ -296,7 +296,12 @@
             <i class="fa-solid fa-futbol text-emerald-600"></i>
             <span>Matcher att tippa på</span>
           </div>
-          <div class="flex gap-2 text-xs">
+          <div class="flex gap-2 text-xs items-center">
+            <button @click="forceRefreshLive()" 
+                    class="px-3 h-8 rounded-2xl border bg-white hover:bg-slate-50 active:bg-slate-100 text-xs flex items-center gap-1">
+              <i class="fa-solid fa-sync fa-xs"></i>
+              <span>Uppdatera live</span>
+            </button>
             <button @click="filter = 'all'" :class="filter==='all' ? 'bg-emerald-600 text-white' : 'bg-white border'" 
                     class="px-3.5 h-8 rounded-2xl font-medium">Alla</button>
             <button @click="filter = 'today'" :class="filter==='today' ? 'bg-emerald-600 text-white' : 'bg-white border'" 
@@ -598,25 +603,22 @@
 
         init() {
           this.refreshAll()
-          // Auto refresh leaderboard + matches every 25s (nice for TV on LAN)
+          // Auto refresh leaderboard + matches every 20s for live scores and updates
           setInterval(() => {
-            this.fetchLeaderboard()
             this.fetchMatches()
-          }, 25000)
+            this.fetchLeaderboard()
+          }, 20000)
 
-          // Auto-sync results more frequently when there might be live matches (every 20s)
+          // Auto call sync-results every 15s to pull latest from open source (finals + when community updates)
           setInterval(() => {
-            const hasLiveOrToday = this.matches.some(m => 
-              m.status === 'live' || 
-              (m.status === 'upcoming' && new Date(m.datetime) < new Date(Date.now() + 3*60*60*1000))
-            )
-            if (hasLiveOrToday) {
-              fetch('/api/sync-results', { method: 'POST' }).then(() => {
+            fetch('/api/sync-results', { method: 'POST' })
+              .then(() => {
+                // After sync, refresh to pick up new live/final scores
                 this.fetchMatches()
                 this.fetchLeaderboard()
-              }).catch(() => {})
-            }
-          }, 20000)
+              })
+              .catch(() => {})
+          }, 15000)
         },
 
         switchUser(user) {
@@ -868,6 +870,15 @@
             await this.refreshAll()
           } catch (e) {
             alert('Kunde inte synka resultat just nu. Kolla internetanslutning eller försök igen senare.')
+          }
+        },
+
+        async forceRefreshLive() {
+          try {
+            await fetch('/api/sync-results', { method: 'POST' })
+            await this.refreshAll()
+          } catch (e) {
+            await this.refreshAll()
           }
         },
 

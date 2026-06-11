@@ -439,7 +439,7 @@ def get_matches():
             if m["result"] and m["result"].get("is_final"):
                 m["status"] = "finished"
                 m["prediction_locked"] = True
-            elif now >= match_dt:
+            elif m["result"] and not m["result"].get("is_final") or now >= match_dt:
                 m["status"] = "live"
                 m["prediction_locked"] = True
             elif now >= match_dt - timedelta(seconds=lock_buffer):
@@ -448,10 +448,6 @@ def get_matches():
             else:
                 m["status"] = "upcoming"
                 m["prediction_locked"] = False
-
-            # For live matches, we may have a provisional result (not final) for live score display
-            if m["status"] == "live" and m["result"] and not m["result"].get("is_final"):
-                m["live_score"] = m["result"]
         except Exception:
             m["status"] = "upcoming"
             m["prediction_locked"] = False
