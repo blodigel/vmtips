@@ -57,18 +57,12 @@ metadata:
   labels:
     app: vmtips
 spec:
-  type: ClusterIP   # eller NodePort om du vill nå direkt från LAN utan ingress
+  type: NodePort   # Enkelt för LAN – nås på nodens IP + port
   selector:
     app: vmtips
   ports:
     - port: 80
       targetPort: 8000
+      nodePort: 30800   # Ändra om 30800 är upptagen
       protocol: TCP
       name: http
-# Om du vill exponera direkt på noden (enkelt för LAN):
-# spec:
-#   type: NodePort
-#   ports:
-#   - port: 80
-#     targetPort: 8000
-#     nodePort: 30800   # valfritt
