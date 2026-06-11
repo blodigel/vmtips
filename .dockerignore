@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+.git
+.gitignore
+README.md
+docker-compose*.yml
+k8s/
+*.md
+.vscode/
+.idea/

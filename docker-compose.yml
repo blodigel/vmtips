@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  vmtips:
+    build: .
+    image: ghcr.io/kallesundvall/vmtips:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - vmtips-data:/data
+    environment:
+      - DB_PATH=/data/vmtips.db
+    restart: unless-stopped
+
+volumes:
+  vmtips-data:

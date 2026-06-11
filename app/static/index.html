@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VM-Tips 2026 • Lillen vs Stinis</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600&amp;display=swap');
+    
+    :root {
+      --primary: #0ea47a;
+    }
+    
+    body {
+      font-family: 'Inter', system_ui, sans-serif;
+    }
+    
+    .title-font {
+      font-family: 'Space Grotesk', 'Inter', sans-serif;
+      font-weight: 600;
+      letter-spacing: -0.025em;
+    }
+
+    .match-card {
+      transition: transform 0.1s ease, box-shadow 0.1s ease;
+    }
+    .match-card:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.05), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+    }
+
+    .team-btn {
+      transition: all 0.1s ease;
+    }
+    .team-btn.active {
+      background-color: #0ea47a;
+      color: white;
+      border-color: #0ea47a;
+      box-shadow: 0 0 0 3px rgba(14, 164, 122, 0.2);
+    }
+    .team-btn:hover:not(.active) {
+      background-color: #f1f5f9;
+    }
+
+    .sweden {
+      background: linear-gradient(135deg, #0052cc 0%, #003d99 100%);
+      color: white;
+    }
+
+    .section-header {
+      font-size: 1.05rem;
+      letter-spacing: -.5px;
+    }
+
+    .points {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .leader-row {
+      transition: background-color .1s;
+    }
+
+    .nav-tab {
+      position: relative;
+    }
+    .nav-tab.active:after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: #0ea47a;
+      border-radius: 3px;
+    }
+
+    .match-time {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .football-bg {
+      background-image: url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 viewBox=%220 0 60 60%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill-rule=%22evenodd%22%3E%3Cpath fill=%22%23f8fafc%22 fill-opacity=%22004%22 d=%22M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-10V8h-2v16h-4v2h4v4h2v-4h4v-2h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 6v-4H4v4H0v2h4v4h2V8h4V6H6z%22/%3E%3C/g%3E%3C/svg%27');
+      background-size: 60px 60px;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900">
+  <div x-data="vmtips()" class="min-h-screen">
+    <!-- HEADER -->
+    <div class="bg-white border-b border-slate-200 sticky top-0 z-50">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6">
+        <div class="flex items-center justify-between h-16">
+          <div class="flex items-center gap-x-3">
+            <div class="flex items-center gap-x-2">
+              <div class="w-10 h-10 bg-emerald-600 text-white rounded-2xl flex items-center justify-center shadow-inner">
+                <i class="fa-solid fa-trophy text-2xl"></i>
+              </div>
+              <div>
+                <div class="title-font text-3xl font-semibold tracking-tighter">VM-Tips</div>
+                <div class="text-[10px] text-emerald-700 -mt-1 font-medium">2026 • LAN EDITION</div>
+              </div>
+            </div>
+            <div class="hidden sm:block px-3 py-1 text-xs rounded-full bg-emerald-100 text-emerald-700 font-medium">Lillen vs Stinis</div>
+          </div>
+
+          <!-- USER SWITCHER -->
+          <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-3xl">
+            <template x-for="user in users" :key="user">
+              <button 
+                @click="switchUser(user)"
+                :class="currentUser === user ? 'bg-white shadow text-emerald-700' : 'text-slate-600 hover:bg-slate-200'"
+                class="px-5 py-2 text-sm font-semibold rounded-[20px] flex items-center gap-x-2 transition-all active:scale-[0.985]">
+                <span x-text="user"></span>
+                <span x-show="currentUser === user" class="text-emerald-500">
+                  <i class="fa-solid fa-check text-xs"></i>
+                </span>
+              </button>
+            </template>
+          </div>
+
+          <div class="flex items-center gap-x-2 text-sm">
+            <div class="hidden md:flex items-center gap-x-1.5 px-3 py-1.5 bg-white border rounded-2xl text-xs text-slate-500">
+              <i class="fa-solid fa-globe fa-sm"></i>
+              <span>Internt LAN</span>
+            </div>
+            <button @click="refreshAll()" 
+                    class="flex items-center gap-x-2 px-4 h-9 text-sm font-medium bg-white hover:bg-slate-50 border rounded-2xl active:bg-slate-100 transition">
+              <i class="fa-solid fa-sync fa-sm"></i>
+              <span class="hidden sm:inline">Uppdatera</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-8">
+      
+      <!-- LIVE LEADERBOARD -->
+      <div class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="px-6 pt-5 pb-4 flex items-center justify-between">
+          <div class="flex items-center gap-x-3">
+            <i class="fa-solid fa-chart-line text-emerald-600 text-xl"></i>
+            <div>
+              <div class="font-semibold text-lg tracking-tight">Live-ställning</div>
+              <div class="text-xs text-slate-500">Uppdateras direkt när resultat matas in</div>
+            </div>
+          </div>
+          <div x-show="leaderboard.length" class="text-xs px-3 py-1 bg-emerald-50 text-emerald-700 rounded-2xl font-medium">
+            <span x-text="leaderboard[0]?.user"></span> leder
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-slate-100">
+          <template x-for="(entry, index) in leaderboard" :key="entry.user">
+            <div class="bg-white p-5 flex items-center gap-4 leader-row"
+                 :class="index === 0 ? 'md:rounded-bl-3xl' : ''">
+              <div class="flex-1">
+                <div class="flex items-baseline gap-x-3">
+                  <div class="text-4xl font-semibold tabular-nums points" x-text="entry.total"></div>
+                  <div class="text-sm text-slate-500">poäng</div>
+                  <div x-show="index === 0" class="ml-auto text-amber-500">
+                    <i class="fa-solid fa-crown text-xl"></i>
+                  </div>
+                </div>
+                <div class="font-semibold text-xl mt-0.5" x-text="entry.user"></div>
+                
+                <div class="flex items-center gap-x-4 text-[13px] mt-3 text-slate-500">
+                  <div class="flex items-center gap-x-1">
+                    <span class="font-medium text-emerald-600" x-text="entry.correct_picks"></span>
+                    <span>rätt resultat</span>
+                  </div>
+                  <div x-show="entry.champion_points > 0" class="flex items-center gap-x-1 text-amber-600">
+                    <i class="fa-solid fa-trophy"></i>
+                    <span>+<span x-text="entry.champion_points"></span></span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="text-right text-xs leading-tight min-w-[92px]">
+                <div class="text-slate-400">Matcher</div>
+                <div class="font-semibold text-lg text-emerald-700 points" x-text="entry.match_points"></div>
+                <div class="text-slate-400 mt-1">Exakt score</div>
+                <div class="font-semibold text-lg text-emerald-700 points" x-text="entry.score_bonus"></div>
+              </div>
+            </div>
+          </template>
+        </div>
+        
+        <div class="px-6 py-3 bg-slate-50 text-xs flex items-center gap-2 text-slate-500 border-t">
+          <i class="fa-solid fa-info-circle"></i>
+          <span>3 poäng för rätt vinnare + 2 bonus för exakt mål</span>
+          <span class="mx-1">•</span>
+          <span x-text="'Turneringsvinnare ger ' + (settings.actual_champion ? '12' : '0') + ' poäng'"></span>
+        </div>
+      </div>
+
+      <!-- TURNINGSVINNARE -->
+      <div class="bg-white rounded-3xl shadow-sm border p-6">
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <div class="flex items-center gap-x-2">
+              <i class="fa-solid fa-globe text-xl text-amber-500"></i>
+              <span class="font-semibold text-xl tracking-tight">Vem vinner VM 2026?</span>
+            </div>
+            <p class="text-sm text-slate-500 mt-0.5">Välj din mästare. 12 poäng om du har rätt när det är klart.</p>
+          </div>
+          <button @click="showAddMatch = false; showChampionPicker = !showChampionPicker"
+                  class="text-xs px-3 py-1 rounded-2xl border bg-white active:bg-amber-50 flex items-center gap-x-1 text-amber-600">
+            <i class="fa-solid fa-edit"></i>
+            <span>Ändra</span>
+          </button>
+        </div>
+
+        <div class="flex flex-wrap gap-3">
+          <template x-for="user in users" :key="user">
+            <div class="flex-1 min-w-[220px] border rounded-2xl p-4"
+                 :class="user === currentUser ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-200'">
+              <div class="flex justify-between items-center">
+                <div class="font-semibold" x-text="user"></div>
+                <div x-show="user === currentUser" class="text-[10px] px-2 py-px bg-emerald-200 text-emerald-700 rounded">DU</div>
+              </div>
+              <div class="mt-2 text-2xl font-semibold tracking-tight" 
+                   x-text="tournamentPicks[user] || '– ingen pick –'"></div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Champion picker -->
+        <div x-show="showChampionPicker" x-transition class="mt-5 border-t pt-5">
+          <div class="text-sm font-medium mb-3">Välj turneringsvinnare för <span class="font-semibold" x-text="currentUser"></span></div>
+          
+          <div class="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-2 max-h-[210px] overflow-auto pr-1">
+            <template x-for="team in allTeams" :key="team">
+              <button @click="selectChampion(team)"
+                      class="px-3 py-2 text-sm rounded-2xl border text-left active:scale-[0.985] transition"
+                      :class="tournamentPicks[currentUser] === team ? 'border-emerald-500 bg-emerald-50 font-semibold' : 'hover:bg-slate-50 border-slate-200'">
+                <span x-text="team"></span>
+              </button>
+            </template>
+          </div>
+
+          <div class="mt-4 flex gap-2">
+            <input x-model="customChampion" type="text" placeholder="Eller skriv in lag..." 
+                   class="flex-1 border rounded-2xl px-4 py-2 text-sm">
+            <button @click="selectChampion(customChampion)" 
+                    class="px-5 rounded-2xl bg-slate-900 text-white text-sm font-medium active:bg-black">Spara</button>
+          </div>
+          <div class="text-[11px] text-slate-400 mt-1">Klicka på ett lag ovan eller skriv in och spara.</div>
+        </div>
+      </div>
+
+      <!-- DAGENS & MATCHER -->
+      <div>
+        <div class="flex items-center justify-between mb-3 px-1">
+          <div class="section-header font-semibold flex items-center gap-x-2">
+            <i class="fa-solid fa-futbol text-emerald-600"></i>
+            <span>Matcher att tippa på</span>
+          </div>
+          <div class="flex gap-2 text-xs">
+            <button @click="filter = 'all'" :class="filter==='all' ? 'bg-emerald-600 text-white' : 'bg-white border'" 
+                    class="px-3.5 h-8 rounded-2xl font-medium">Alla</button>
+            <button @click="filter = 'today'" :class="filter==='today' ? 'bg-emerald-600 text-white' : 'bg-white border'" 
+                    class="px-3.5 h-8 rounded-2xl font-medium">Idag</button>
+            <button @click="filter = 'upcoming'" :class="filter==='upcoming' ? 'bg-emerald-600 text-white' : 'bg-white border'" 
+                    class="px-3.5 h-8 rounded-2xl font-medium">Kommande</button>
+          </div>
+        </div>
+
+        <!-- Matches list -->
+        <div class="space-y-3">
+          <template x-if="filteredMatches.length === 0">
+            <div class="text-center py-10 text-slate-400">Inga matcher matchar filtret.</div>
+          </template>
+
+          <template x-for="match in filteredMatches" :key="match.id">
+            <div class="match-card bg-white border border-slate-200 rounded-3xl p-5">
+              <div class="flex flex-col sm:flex-row sm:items-center gap-y-3">
+                <!-- Match info -->
+                <div class="flex-1">
+                  <div class="flex items-center gap-x-2 text-xs">
+                    <span class="font-mono text-emerald-700 bg-emerald-100 px-2 py-px rounded" x-text="formatDateShort(match.datetime)"></span>
+                    <span class="font-medium text-slate-500" x-text="match.stage"></span>
+                  </div>
+                  
+                  <div class="mt-2 flex items-center gap-3 text-[21px] font-semibold tracking-[-0.3px]">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span class="font-semibold" :class="match.home === 'Sverige' ? 'text-blue-700' : ''" x-text="match.home"></span>
+                    </div>
+                    <span class="text-slate-300 font-normal px-1">–</span>
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span class="font-semibold" :class="match.away === 'Sverige' ? 'text-blue-700' : ''" x-text="match.away"></span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Result or Prediction area -->
+                <div class="sm:w-[340px] w-full">
+                  <!-- FINISHED -->
+                  <div x-show="match.result" class="flex items-center gap-4">
+                    <div class="flex-1">
+                      <div class="uppercase tracking-widest text-xs text-emerald-600 font-semibold mb-px">RESULTAT</div>
+                      <div class="flex items-baseline gap-x-2">
+                        <span class="text-4xl font-semibold tabular-nums" x-text="match.result.home_goals"></span>
+                        <span class="text-2xl text-slate-400">-</span>
+                        <span class="text-4xl font-semibold tabular-nums" x-text="match.result.away_goals"></span>
+                      </div>
+                    </div>
+                    
+                    <div class="text-xs border-l pl-4">
+                      <div class="text-slate-500 mb-px">Ditt tips</div>
+                      <template x-if="match.predictions && match.predictions[currentUser]">
+                        <div class="font-semibold">
+                          <span x-text="match.predictions[currentUser].home_goals"></span>–<span x-text="match.predictions[currentUser].away_goals"></span>
+                          <span class="ml-2 inline-block px-2 py-px text-[10px] bg-emerald-100 text-emerald-700 rounded font-medium"
+                                x-text="getMatchPoints(match, currentUser) + 'p'"></span>
+                        </div>
+                      </template>
+                      <template x-if="!(match.predictions && match.predictions[currentUser])">
+                        <div class="text-slate-400">Inget tips</div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- OPEN FOR BETTING -->
+                  <div x-show="!match.result" class="space-y-2.5">
+                    <div class="flex gap-1.5">
+                      <!-- Winner quick picks -->
+                      <button @click="quickPickWinner(match, 'home')" 
+                              class="team-btn flex-1 border text-sm font-medium py-[9px] px-3 rounded-2xl"
+                              :class="getCurrentPrediction(match)?.home_goals > getCurrentPrediction(match)?.away_goals ? 'active' : ''">
+                        <span x-text="match.home"></span>
+                      </button>
+                      <button @click="quickPickWinner(match, 'draw')" 
+                              class="team-btn flex-1 border text-sm font-medium py-[9px] px-3 rounded-2xl"
+                              :class="getCurrentPrediction(match)?.home_goals === getCurrentPrediction(match)?.away_goals ? 'active' : ''">
+                        Oavgjort
+                      </button>
+                      <button @click="quickPickWinner(match, 'away')" 
+                              class="team-btn flex-1 border text-sm font-medium py-[9px] px-3 rounded-2xl"
+                              :class="getCurrentPrediction(match)?.away_goals > getCurrentPrediction(match)?.home_goals ? 'active' : ''">
+                        <span x-text="match.away"></span>
+                      </button>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                      <div class="flex-1">
+                        <div class="text-[10px] text-slate-500 mb-1 font-medium pl-1">Ditt tips</div>
+                        <div class="flex items-center gap-2">
+                          <input type="number" min="0" max="12" 
+                                 class="w-14 border text-center font-semibold rounded-2xl py-2 text-lg"
+                                 :value="getCurrentPrediction(match)?.home_goals ?? 0"
+                                 @input="updatePredictionScore(match, 'home', $event.target.value)">
+                          <span class="text-slate-300 text-lg font-light">–</span>
+                          <input type="number" min="0" max="12" 
+                                 class="w-14 border text-center font-semibold rounded-2xl py-2 text-lg"
+                                 :value="getCurrentPrediction(match)?.away_goals ?? 0"
+                                 @input="updatePredictionScore(match, 'away', $event.target.value)">
+                        </div>
+                      </div>
+                      
+                      <button @click="savePrediction(match)"
+                              class="mt-5 self-end bg-emerald-600 active:bg-emerald-700 transition text-white font-semibold px-6 h-11 rounded-2xl text-sm flex items-center gap-x-2">
+                        <i class="fa-solid fa-save"></i>
+                        <span>Spara</span>
+                      </button>
+                    </div>
+
+                    <!-- Other user's pick -->
+                    <div class="text-[11px] text-slate-500 pl-1 pt-0.5">
+                      <span x-text="getOtherUser()"></span> tippade: 
+                      <template x-if="match.predictions && match.predictions[getOtherUser()]">
+                        <span class="font-medium text-slate-700" x-text="match.predictions[getOtherUser()].home_goals + '–' + match.predictions[getOtherUser()].away_goals"></span>
+                      </template>
+                      <template x-if="!(match.predictions && match.predictions[getOtherUser()])">
+                        <span class="text-slate-400">–</span>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ADMIN / RESULTAT -->
+      <div class="bg-white border border-slate-200 rounded-3xl p-6">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <span class="font-semibold text-lg">Hantera resultat &amp; matcher</span>
+            <span class="ml-2 text-xs px-2 py-px rounded bg-amber-100 text-amber-700">För er två</span>
+          </div>
+          <button @click="showAdmin = !showAdmin" class="text-sm font-medium px-4 py-1 border rounded-2xl active:bg-slate-50">
+            <span x-text="showAdmin ? 'Dölj' : 'Visa'"></span>
+          </button>
+        </div>
+
+        <div x-show="showAdmin" x-transition class="space-y-6">
+          <!-- Add match -->
+          <div>
+            <div class="text-sm font-medium mb-2">Lägg till ny match</div>
+            <div class="grid grid-cols-1 sm:grid-cols-5 gap-2">
+              <input type="datetime-local" x-model="newMatch.datetime" class="border rounded-2xl px-3 py-2 text-sm col-span-2">
+              <input type="text" x-model="newMatch.home" placeholder="Hemmalag" class="border rounded-2xl px-3 py-2 text-sm">
+              <input type="text" x-model="newMatch.away" placeholder="Bortalag" class="border rounded-2xl px-3 py-2 text-sm">
+              <div class="flex gap-2">
+                <input type="text" x-model="newMatch.stage" placeholder="Grupp X" class="flex-1 border rounded-2xl px-3 py-2 text-sm">
+                <button @click="addMatch" class="bg-slate-900 text-white px-5 rounded-2xl text-sm font-medium active:bg-black">Lägg till</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Enter results -->
+          <div>
+            <div class="text-sm font-medium mb-2">Mata in resultat (när matchen är klar)</div>
+            <div class="space-y-2">
+              <template x-for="match in matches" :key="'res-'+match.id">
+                <div class="flex items-center gap-3 border rounded-2xl px-4 py-3 text-sm">
+                  <div class="flex-1 min-w-0">
+                    <span class="font-medium" x-text="match.home + ' – ' + match.away"></span>
+                    <span class="text-xs text-slate-400 ml-2" x-text="formatDateShort(match.datetime)"></span>
+                  </div>
+                  
+                  <div class="flex items-center gap-2">
+                    <input type="number" min="0" class="w-11 text-center border rounded-2xl py-1" :value="match.result ? match.result.home_goals : ''"
+                           @input="tempResult[match.id] = {...(tempResult[match.id]||{}), home: parseInt($event.target.value)}">
+                    <span class="text-slate-400">–</span>
+                    <input type="number" min="0" class="w-11 text-center border rounded-2xl py-1" :value="match.result ? match.result.away_goals : ''"
+                           @input="tempResult[match.id] = {...(tempResult[match.id]||{}), away: parseInt($event.target.value)}">
+                    
+                    <button @click="saveResult(match)" 
+                            class="ml-1 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 transition text-white px-4 rounded-2xl h-8">
+                      Spara resultat
+                    </button>
+                    
+                    <button @click="deleteMatch(match)" 
+                            class="ml-1 text-xs text-red-500 hover:text-red-600 px-2">
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </div>
+            <div class="text-xs text-slate-400 mt-2">När du sparar resultat räknas poängen om direkt för båda.</div>
+          </div>
+
+          <!-- Set tournament winner -->
+          <div class="border-t pt-5">
+            <div class="text-sm font-medium mb-1">Sätt riktig turneringsvinnare (när VM är över)</div>
+            <div class="flex gap-2 items-center">
+              <input x-model="actualChampionInput" type="text" placeholder="T.ex. Argentina" class="border px-3 py-2 rounded-2xl text-sm flex-1">
+              <button @click="setActualChampion()" class="px-5 bg-amber-500 text-white font-medium h-10 rounded-2xl active:bg-amber-600 text-sm">Sätt vinnare &amp; ge poäng</button>
+              <button @click="clearActualChampion()" class="px-4 text-xs text-slate-500">Rensa</button>
+            </div>
+            <div x-show="settings.actual_champion" class="text-emerald-600 text-xs mt-1.5">Aktuell officiell vinnare: <span class="font-semibold" x-text="settings.actual_champion"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FOOTER INFO -->
+      <div class="text-center text-xs text-slate-400 pb-6">
+        Körs lokalt på er Raspberry Pi i Kubernetes • All data sparas i SQLite på disken • Två användare, full transparens
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function vmtips() {
+      return {
+        users: ['Lillen', 'Stinis'],
+        currentUser: localStorage.getItem('currentUser') || 'Lillen',
+        matches: [],
+        leaderboard: [],
+        tournamentPicks: {},
+        settings: { actual_champion: null },
+        filter: 'all',
+        showAdmin: false,
+        showChampionPicker: false,
+        customChampion: '',
+        newMatch: { datetime: '', home: '', away: '', stage: 'Grupp' },
+        tempResult: {},
+        actualChampionInput: '',
+        allTeams: [
+          'Sverige', 'Nederländerna', 'Japan', 'Tunisien',
+          'Brasilien', 'Argentina', 'Tyskland', 'Spanien', 'Frankrike', 'England',
+          'Portugal', 'Belgien', 'Italien', 'Kroatien', 'Nederländerna',
+          'Mexico', 'USA', 'Canada', 'South Korea', 'Czechia',
+          'Marocko', 'Senegal', 'Uruguay', 'Schweiz', 'Danmark', 'Norge',
+          'Polen', 'Österrike', 'Serbien', 'Turkiet', 'Australien',
+          'Japan', 'Iran', 'Saudi Arabia', 'Qatar', 'Irak',
+          'Egypten', 'Elfenbenskusten', 'Ghana', 'Algeriet',
+          'Paraguay', 'Ecuador', 'Colombia', 'Peru', 'Chile'
+        ],
+
+        init() {
+          this.refreshAll()
+          // Auto refresh leaderboard + matches every 25s (nice for TV on LAN)
+          setInterval(() => {
+            this.fetchLeaderboard()
+            this.fetchMatches()
+          }, 25000)
+        },
+
+        switchUser(user) {
+          this.currentUser = user
+          localStorage.setItem('currentUser', user)
+        },
+
+        getOtherUser() {
+          return this.users.find(u => u !== this.currentUser)
+        },
+
+        async refreshAll() {
+          await Promise.all([
+            this.fetchMatches(),
+            this.fetchLeaderboard(),
+            this.fetchTournamentPicks(),
+            this.fetchSettings()
+          ])
+        },
+
+        async fetchMatches() {
+          try {
+            const res = await fetch('/api/matches')
+            this.matches = await res.json()
+          } catch (e) {
+            console.error(e)
+          }
+        },
+
+        async fetchLeaderboard() {
+          try {
+            const res = await fetch('/api/leaderboard')
+            const data = await res.json()
+            this.leaderboard = data.leaderboard || []
+            if (data.actual_champion) this.settings.actual_champion = data.actual_champion
+          } catch (e) {}
+        },
+
+        async fetchTournamentPicks() {
+          try {
+            const picks = {}
+            for (const u of this.users) {
+              const r = await fetch(`/api/tournament-pick?user=${encodeURIComponent(u)}`)
+              const data = await r.json()
+              picks[u] = data.champion
+            }
+            this.tournamentPicks = picks
+          } catch (e) {}
+        },
+
+        async fetchSettings() {
+          try {
+            const r = await fetch('/api/settings')
+            this.settings = await r.json()
+            this.actualChampionInput = this.settings.actual_champion || ''
+          } catch (e) {}
+        },
+
+        formatDateShort(iso) {
+          try {
+            const d = new Date(iso)
+            return d.toLocaleDateString('sv-SE', { month: 'short', day: 'numeric' }) + ' ' + 
+                   d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
+          } catch {
+            return iso
+          }
+        },
+
+        get filteredMatches() {
+          let list = [...this.matches]
+          
+          // sort by datetime
+          list.sort((a, b) => new Date(a.datetime) - new Date(b.datetime))
+
+          const now = new Date()
+          if (this.filter === 'today') {
+            list = list.filter(m => {
+              const md = new Date(m.datetime)
+              return md.toDateString() === now.toDateString()
+            })
+          } else if (this.filter === 'upcoming') {
+            list = list.filter(m => !m.result)
+          }
+          return list
+        },
+
+        getCurrentPrediction(match) {
+          if (!match.predictions) return null
+          return match.predictions[this.currentUser]
+        },
+
+        quickPickWinner(match, side) {
+          const pred = this.getCurrentPrediction(match) || { home_goals: 0, away_goals: 0 }
+          let h = pred.home_goals || 0
+          let a = pred.away_goals || 0
+
+          if (side === 'home') {
+            h = Math.max(h, 1); a = Math.min(a, h - 1)
+            if (h === a) h = a + 1
+          } else if (side === 'away') {
+            a = Math.max(a, 1); h = Math.min(h, a - 1)
+            if (h === a) a = h + 1
+          } else { // draw
+            const avg = Math.round((h + a) / 2) || 1
+            h = avg; a = avg
+          }
+
+          // optimistic update
+          if (!match.predictions) match.predictions = {}
+          match.predictions[this.currentUser] = { home_goals: h, away_goals: a }
+
+          // auto save immediately for speed
+          this.savePrediction(match, true)
+        },
+
+        updatePredictionScore(match, side, val) {
+          const num = parseInt(val) || 0
+          if (!match.predictions) match.predictions = {}
+          if (!match.predictions[this.currentUser]) {
+            match.predictions[this.currentUser] = { home_goals: 0, away_goals: 0 }
+          }
+          if (side === 'home') match.predictions[this.currentUser].home_goals = num
+          else match.predictions[this.currentUser].away_goals = num
+        },
+
+        async savePrediction(match, silent = false) {
+          const pred = this.getCurrentPrediction(match)
+          if (!pred) return
+
+          try {
+            await fetch('/api/predictions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                match_id: match.id,
+                user: this.currentUser,
+                home_goals: pred.home_goals,
+                away_goals: pred.away_goals
+              })
+            })
+            if (!silent) await this.refreshAll()
+          } catch (e) {
+            alert('Kunde inte spara tipset')
+          }
+        },
+
+        getMatchPoints(match, user) {
+          if (!match.result || !match.predictions || !match.predictions[user]) return 0
+          const p = match.predictions[user]
+          const r = match.result
+          // replicate backend logic client side for display
+          let pts = 0
+          const winActual = r.home_goals > r.away_goals ? 'H' : (r.away_goals > r.home_goals ? 'A' : 'D')
+          const winPred = p.home_goals > p.away_goals ? 'H' : (p.away_goals > p.home_goals ? 'A' : 'D')
+          if (winPred === winActual) pts += 3
+          if (p.home_goals === r.home_goals && p.away_goals === r.away_goals) pts += 2
+          return pts
+        },
+
+        async addMatch() {
+          if (!this.newMatch.datetime || !this.newMatch.home || !this.newMatch.away) {
+            alert('Fyll i datum, hemmalag och bortalag')
+            return
+          }
+          try {
+            await fetch('/api/matches', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(this.newMatch)
+            })
+            this.newMatch = { datetime: '', home: '', away: '', stage: 'Grupp' }
+            await this.fetchMatches()
+          } catch (e) { alert('Kunde inte lägga till match') }
+        },
+
+        async saveResult(match) {
+          const tr = this.tempResult[match.id]
+          if (!tr || tr.home === undefined || tr.away === undefined) {
+            alert('Ange både hemmamål och borta mål')
+            return
+          }
+          try {
+            await fetch(`/api/matches/${match.id}/result`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ home_goals: tr.home, away_goals: tr.away })
+            })
+            delete this.tempResult[match.id]
+            await this.refreshAll()
+          } catch (e) {
+            alert('Kunde inte spara resultat')
+          }
+        },
+
+        async deleteMatch(match) {
+          if (!confirm(`Ta bort matchen ${match.home} – ${match.away}?`)) return
+          try {
+            await fetch(`/api/matches/${match.id}`, { method: 'DELETE' })
+            await this.fetchMatches()
+          } catch (e) {}
+        },
+
+        async selectChampion(team) {
+          if (!team) return
+          try {
+            await fetch('/api/tournament-pick', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ user: this.currentUser, champion: team })
+            })
+            this.showChampionPicker = false
+            this.customChampion = ''
+            await this.fetchTournamentPicks()
+            await this.fetchLeaderboard()
+          } catch (e) {}
+        },
+
+        async setActualChampion() {
+          if (!this.actualChampionInput) return
+          try {
+            await fetch(`/api/set-champion?champion=${encodeURIComponent(this.actualChampionInput)}`, { method: 'POST' })
+            await this.refreshAll()
+          } catch (e) {}
+        },
+
+        async clearActualChampion() {
+          try {
+            await fetch('/api/set-champion?champion=', { method: 'POST' })
+            await this.refreshAll()
+          } catch (e) {}
+        }
+      }
+    }
+
+    // Tailwind script run
+    function initTailwind() {
+      document.documentElement.style.setProperty('--accent', '#0ea47a')
+    }
+    window.onload = () => initTailwind()
+  </script>
+</body>
+</html>

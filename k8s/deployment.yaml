@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmtips
+  labels:
+    app: vmtips
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vmtips
+  template:
+    metadata:
+      labels:
+        app: vmtips
+    spec:
+      containers:
+        - name: vmtips
+          image: ghcr.io/kallesundvall/vmtips:latest   # ÄNDRA TILL DIN IMAGE
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: DB_PATH
+              value: /data/vmtips.db
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: vmtips-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmtips
+  labels:
+    app: vmtips
+spec:
+  type: ClusterIP   # eller NodePort om du vill nå direkt från LAN utan ingress
+  selector:
+    app: vmtips
+  ports:
+    - port: 80
+      targetPort: 8000
+      protocol: TCP
+      name: http
+# Om du vill exponera direkt på noden (enkelt för LAN):
+# spec:
+#   type: NodePort
+#   ports:
+#   - port: 80
+#     targetPort: 8000
+#     nodePort: 30800   # valfritt
