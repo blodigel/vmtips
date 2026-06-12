@@ -8,7 +8,7 @@ import sqlite3
 import json
 import os
 import asyncio
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List
 
@@ -172,35 +172,35 @@ def seed_data(conn):
     # Seed some realistic early matches from VM 2026 (using data from public sources June 2026)
     # Format: (iso_datetime, home, away, stage)
     matches = [
-        # 11 juni - öppningsdag
-        ("2026-06-11T15:00:00", "Mexico", "South Africa", "Grupp A"),
-        ("2026-06-11T22:00:00", "South Korea", "Czechia", "Grupp A"),
+        # 11 juni - öppningsdag (converted to UTC from source UTC-6 etc.)
+        ("2026-06-11T21:00:00", "Mexico", "South Africa", "Grupp A"),
+        ("2026-06-12T04:00:00", "South Korea", "Czechia", "Grupp A"),
 
         # 12 juni
-        ("2026-06-12T15:00:00", "Canada", "Bosnia and Herzegovina", "Grupp B"),
-        ("2026-06-12T21:00:00", "USA", "Paraguay", "Grupp D"),
+        ("2026-06-12T21:00:00", "Canada", "Bosnia and Herzegovina", "Grupp B"),
+        ("2026-06-13T03:00:00", "USA", "Paraguay", "Grupp D"),
 
         # 13 juni
-        ("2026-06-13T15:00:00", "Australia", "Türkiye", "Grupp D"),
-        ("2026-06-13T18:00:00", "Brazil", "Morocco", "Grupp C"),
-        ("2026-06-13T21:00:00", "Haiti", "Scotland", "Grupp C"),
+        ("2026-06-13T21:00:00", "Australia", "Türkiye", "Grupp D"),
+        ("2026-06-14T00:00:00", "Brazil", "Morocco", "Grupp C"),
+        ("2026-06-14T03:00:00", "Haiti", "Scotland", "Grupp C"),
 
-        # Sverige matcher + andra
-        ("2026-06-15T04:00:00", "Sverige", "Tunisien", "Grupp F"),
-        ("2026-06-15T18:00:00", "Spanien", "Kap Verde", "Grupp H"),
-        ("2026-06-15T22:00:00", "Tyskland", "Elfenbenskusten", "Grupp E"),
+        # Sverige matcher + andra (adjusted to UTC)
+        ("2026-06-15T10:00:00", "Sverige", "Tunisien", "Grupp F"),
+        ("2026-06-16T00:00:00", "Spanien", "Kap Verde", "Grupp H"),
+        ("2026-06-16T04:00:00", "Tyskland", "Elfenbenskusten", "Grupp E"),
 
         # 20 juni - Sverige
-        ("2026-06-20T19:00:00", "Nederländerna", "Sverige", "Grupp F"),
+        ("2026-06-21T01:00:00", "Nederländerna", "Sverige", "Grupp F"),
 
         # 26 juni - Sverige
-        ("2026-06-26T01:00:00", "Japan", "Sverige", "Grupp F"),
+        ("2026-06-26T07:00:00", "Japan", "Sverige", "Grupp F"),
 
         # Extra intressanta gruppspelsmatcher
-        ("2026-06-14T19:00:00", "Nederländerna", "Japan", "Grupp F"),
-        ("2026-06-18T15:00:00", "Argentina", "Algeriet", "Grupp J"),
-        ("2026-06-19T18:00:00", "England", "Croatia", "Grupp L"),
-        ("2026-06-22T15:00:00", "Frankrike", "Senegal", "Grupp K"),
+        ("2026-06-15T01:00:00", "Nederländerna", "Japan", "Grupp F"),
+        ("2026-06-18T21:00:00", "Argentina", "Algeriet", "Grupp J"),
+        ("2026-06-20T00:00:00", "England", "Croatia", "Grupp L"),
+        ("2026-06-22T21:00:00", "Frankrike", "Senegal", "Grupp K"),
     ]
 
     for dt, home, away, stage in matches:
@@ -372,8 +372,8 @@ async def sync_results_from_openfootball() -> int:
 
 async def periodic_result_sync():
     """Background task that automatically syncs results from the public source
-    every 60 seconds. This means final results will appear without you having
-    to manually click the sync button or enter anything."""
+    every 60 seconds. Final results (when the open source JSON is updated after a match)
+    will be pulled and set automatically - no manual entry needed for completed matches."""
     while True:
         try:
             count = await sync_results_from_openfootball()
@@ -448,19 +448,21 @@ def get_matches():
             preds[user] = {"home_goals": p[0], "away_goals": p[1]} if p else None
         m["predictions"] = preds
 
-        # Compute status and lock
+        # Compute status and lock (all times treated as UTC)
         try:
             match_dt = datetime.fromisoformat(m["datetime"])
-            now = datetime.now()
-            lock_buffer = 5 * 60  # 5 minutes before kickoff predictions lock
+            if match_dt.tzinfo is None:
+                match_dt = match_dt.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            lock_buffer = timedelta(minutes=5)  # 5 minutes before kickoff predictions lock
 
             if m["result"] and m["result"].get("is_final"):
                 m["status"] = "finished"
                 m["prediction_locked"] = True
-            elif m["result"] and not m["result"].get("is_final") or now >= match_dt:
+            elif (m["result"] and not m["result"].get("is_final")) or now >= match_dt:
                 m["status"] = "live"
                 m["prediction_locked"] = True
-            elif now >= match_dt - timedelta(seconds=lock_buffer):
+            elif now >= match_dt - lock_buffer:
                 m["status"] = "upcoming"
                 m["prediction_locked"] = True
             else:

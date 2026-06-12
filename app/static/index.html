@@ -483,6 +483,7 @@
                 <button @click="addMatch" class="bg-slate-900 text-white px-5 rounded-2xl text-sm font-medium active:bg-black">Lägg till</button>
               </div>
             </div>
+            <div class="text-[10px] text-slate-400 mt-1">Tips: Ange tiden i UTC (t.ex. 2026-06-15T10:00) så att status (live/upcoming) och auto-låsning av tippning stämmer med API-källan.</div>
           </div>
 
           <!-- Enter results + auto sync -->
@@ -496,8 +497,9 @@
               </button>
             </div>
             <div class="text-xs text-slate-500 mb-3">
-              Bakgrunds-synk körs automatiskt var minut på servern och hämtar färdiga resultat från gratis öppen datakälla (openfootball/worldcup.json).<br>
-              Knappen "Synka" tvingar en omedelbar uppdatering. Du slipper mata in slutresultat manuellt – de dyker upp automatiskt när källan uppdateras.
+              <strong>Automatisk synk:</strong> Bakgrundsjobbet kör var 60:e sekund på servern och hämtar färdiga resultat från gratis öppen datakälla (openfootball/worldcup.json).<br>
+              Du behöver inte mata in slutresultat manuellt – när källan uppdateras efter en match dyker det upp automatiskt som SLUTRESULTAT och poäng delas ut.<br>
+              Knappen "Synka" tvingar en omedelbar koll.
             </div>
 
             <div class="space-y-2">
