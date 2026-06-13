@@ -248,7 +248,7 @@ def calculate_points(pred_h: int, pred_a: int, act_h: int, act_a: int) -> int:
 
 
 TEAM_ALIASES = {
-    # English variations -> our preferred (or common in our DB)
+    # English variations -> canonical lower for matching
     "south korea": "south korea",
     "korea republic": "south korea",
     "czech republic": "czechia",
@@ -290,7 +290,12 @@ TEAM_ALIASES = {
     "senegal": "senegal",
     "egypt": "egypten",
     "ghana": "ghana",
-    # Swedish names from our seed
+    "panama": "panama",
+    "italy": "italy",
+    "denmark": "denmark",
+    "poland": "poland",
+    "serbia": "serbia",
+    # Swedish names from our seed (map to english canonical for cross matching)
     "sverige": "sverige",
     "tunisien": "tunisien",
     "nederländerna": "nederländerna",
@@ -326,9 +331,21 @@ async def sync_results_from_openfootball() -> int:
     cur = conn.cursor()
 
     for r in remote_matches:
-        # Only process finished matches that have scores
-        score1 = r.get("score1")
-        score2 = r.get("score2")
+        # Parse score - openfootball uses "score": {"ft": [home, away]} for finished matches
+        # Some entries may have "goals1"/"goals2" arrays too, but ft is the final score
+        score1 = None
+        score2 = None
+        score = r.get("score") or {}
+        if isinstance(score, dict) and "ft" in score:
+            ft = score.get("ft", [None, None])
+            if len(ft) >= 2:
+                score1 = ft[0]
+                score2 = ft[1]
+        else:
+            # fallback for other formats in the repo
+            score1 = r.get("score1")
+            score2 = r.get("score2")
+
         if score1 is None or score2 is None:
             continue
 
