@@ -355,46 +355,36 @@ async def sync_results_from_openfootball() -> int:
 
     for r in remote_matches:
         r_date = r.get("date", "")
-        t1 = normalize_team(r.get("team1", ""))
-        t2 = normalize_team(r.get("team2", ""))
         stage = r.get("group") or r.get("round", "Grupp")
         dt_str = parse_match_kickoff_utc(r_date, r.get("time", ""))
 
-        if not dt_str or not t1 or not t2:
+        if not dt_str:
             continue
 
-        # Upsert match with correct UTC time (update time if exists for consistency)
-        # Check if exists before
+        home = r.get("team1", "")
+        away = r.get("team2", "")
+
+        # Robust existence check by team names (case-insensitive), ignore current datetime
+        # This prevents dups even if previous seeds had different names/casing/datetimes
         cur.execute("""
             SELECT id FROM matches 
-            WHERE home = ? AND away = ? AND datetime LIKE ? 
+            WHERE (lower(home) = lower(?) AND lower(away) = lower(?))
+               OR (lower(home) = lower(?) AND lower(away) = lower(?))
             LIMIT 1
-        """, (r.get("team1", ""), r.get("team2", ""), r_date + "%"))
-        existed = cur.fetchone() is not None
-
-        cur.execute("""
-            INSERT OR IGNORE INTO matches (datetime, home, away, stage)
-            VALUES (?, ?, ?, ?)
-        """, (dt_str, r.get("team1", ""), r.get("team2", ""), stage))
-
-        cur.execute("""
-            UPDATE matches SET datetime = ?, stage = ?
-            WHERE home = ? AND away = ? AND datetime LIKE ?
-        """, (dt_str, stage, r.get("team1", ""), r.get("team2", ""), r_date + "%"))
-
-        if not existed:
-            added_matches += 1
-
-        # Find the id
-        cur.execute("""
-            SELECT id FROM matches 
-            WHERE home = ? AND away = ? AND datetime LIKE ? 
-            LIMIT 1
-        """, (r.get("team1", ""), r.get("team2", ""), r_date + "%"))
+        """, (home, away, away, home))
         row = cur.fetchone()
-        if not row:
-            continue
-        mid = row[0]
+
+        if row:
+            mid = row[0]
+            # correct the time/stage on the existing row
+            cur.execute("UPDATE matches SET datetime = ?, stage = ? WHERE id = ?", (dt_str, stage, mid))
+        else:
+            cur.execute("""
+                INSERT INTO matches (datetime, home, away, stage)
+                VALUES (?, ?, ?, ?)
+            """, (dt_str, home, away, stage))
+            mid = cur.lastrowid
+            added_matches += 1
 
         # Parse and upsert result if present
         score1 = None
@@ -414,7 +404,7 @@ async def sync_results_from_openfootball() -> int:
             cur2 = conn.cursor()
             cur2.execute("SELECT home_goals, away_goals, is_final FROM match_results WHERE match_id = ?", (mid,))
             existing = cur2.fetchone()
-            if not existing or existing["home_goals"] != new_h or existing["away_goals"] != new_a or not existing["is_final"]:
+            if not existing or existing["home_goals"] != new_h or existing["away_goals"] != new_a or not existing.get("is_final"):
                 cur2.execute(
                     "INSERT OR REPLACE INTO match_results (match_id, home_goals, away_goals, is_final) VALUES (?, ?, ?, 1)",
                     (mid, new_h, new_a)
