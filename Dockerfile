@@ -16,6 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # App code
 COPY app/ ./app/
 
+# Scripts (for one-off migrations like dedup)
+COPY scripts/ ./scripts/
+RUN chmod +x ./scripts/migrate_dedup_db.py
+
 # Create data dir for volume mount (SQLite)
 RUN mkdir -p /data
 
