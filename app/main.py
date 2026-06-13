@@ -310,11 +310,35 @@ def normalize_team(name: str) -> str:
     return TEAM_ALIASES.get(key, key)
 
 
+def parse_match_kickoff_utc(date_str: str, time_str: str) -> str:
+    """Parse '2026-06-13' + '12:00 UTC-7' into UTC ISO string (naive UTC)."""
+    if not date_str:
+        return ""
+    import re
+    if not time_str:
+        return f"{date_str}T00:00:00"
+    m = re.search(r'(\d{1,2}):(\d{2})\s+UTC([+-]?\d+)', time_str)
+    if not m:
+        return f"{date_str}T00:00:00"
+    h, mi, off_str = m.groups()
+    try:
+        local_dt = datetime.strptime(f"{date_str} {int(h):02d}:{mi}", "%Y-%m-%d %H:%M")
+        offset = int(off_str)
+        # local = UTC + offset (offset is negative for western zones)
+        # UTC = local - offset
+        utc_dt = local_dt - timedelta(hours=offset)
+        return utc_dt.isoformat()
+    except Exception:
+        return f"{date_str}T00:00:00"
+
+
 async def sync_results_from_openfootball() -> int:
-    """Hämtar resultat från openfootball/worldcup.json (gratis, ingen nyckel behövs)
-    och uppdaterar lokala matcher som är klara."""
+    """Hämtar hela schemat + resultat från openfootball/worldcup.json (gratis, ingen nyckel).
+    Importerar saknade matcher med korrekta UTC-tider och uppdaterar resultat när de finns.
+    Detta gör att hela schemat (inkl. Qatar-Schweiz) och automatiska slutresultat fungerar."""
     url = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
-    updated = 0
+    updated_results = 0
+    added_matches = 0
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -326,13 +350,53 @@ async def sync_results_from_openfootball() -> int:
         return 0
 
     remote_matches = data.get("matches", [])
-
     conn = get_db()
     cur = conn.cursor()
 
     for r in remote_matches:
-        # Parse score - openfootball uses "score": {"ft": [home, away]} for finished matches
-        # Some entries may have "goals1"/"goals2" arrays too, but ft is the final score
+        r_date = r.get("date", "")
+        t1 = normalize_team(r.get("team1", ""))
+        t2 = normalize_team(r.get("team2", ""))
+        stage = r.get("group") or r.get("round", "Grupp")
+        dt_str = parse_match_kickoff_utc(r_date, r.get("time", ""))
+
+        if not dt_str or not t1 or not t2:
+            continue
+
+        # Upsert match with correct UTC time (update time if exists for consistency)
+        # Check if exists before
+        cur.execute("""
+            SELECT id FROM matches 
+            WHERE home = ? AND away = ? AND datetime LIKE ? 
+            LIMIT 1
+        """, (r.get("team1", ""), r.get("team2", ""), r_date + "%"))
+        existed = cur.fetchone() is not None
+
+        cur.execute("""
+            INSERT OR IGNORE INTO matches (datetime, home, away, stage)
+            VALUES (?, ?, ?, ?)
+        """, (dt_str, r.get("team1", ""), r.get("team2", ""), stage))
+
+        cur.execute("""
+            UPDATE matches SET datetime = ?, stage = ?
+            WHERE home = ? AND away = ? AND datetime LIKE ?
+        """, (dt_str, stage, r.get("team1", ""), r.get("team2", ""), r_date + "%"))
+
+        if not existed:
+            added_matches += 1
+
+        # Find the id
+        cur.execute("""
+            SELECT id FROM matches 
+            WHERE home = ? AND away = ? AND datetime LIKE ? 
+            LIMIT 1
+        """, (r.get("team1", ""), r.get("team2", ""), r_date + "%"))
+        row = cur.fetchone()
+        if not row:
+            continue
+        mid = row[0]
+
+        # Parse and upsert result if present
         score1 = None
         score2 = None
         score = r.get("score") or {}
@@ -342,49 +406,27 @@ async def sync_results_from_openfootball() -> int:
                 score1 = ft[0]
                 score2 = ft[1]
         else:
-            # fallback for other formats in the repo
             score1 = r.get("score1")
             score2 = r.get("score2")
 
-        if score1 is None or score2 is None:
-            continue
-
-        r_date = r.get("date", "")
-        t1 = normalize_team(r.get("team1", ""))
-        t2 = normalize_team(r.get("team2", ""))
-
-        # Find matching local match by date and normalized team names
-        # Our datetimes start with YYYY-MM-DD
-        cur.execute("""
-            SELECT id, home, away FROM matches
-            WHERE datetime LIKE ? || '%'
-        """, (r_date,))
-        candidates = cur.fetchall()
-
-        for cand in candidates:
-            local_id, home, away = cand["id"], cand["home"], cand["away"]
-            l1 = normalize_team(home)
-            l2 = normalize_team(away)
-
-            if (l1 == t1 and l2 == t2) or (l1 == t2 and l2 == t1):
-                # Check if we already have this result
-                cur2 = conn.cursor()
-                cur2.execute("SELECT home_goals, away_goals FROM match_results WHERE match_id = ?", (local_id,))
-                existing = cur2.fetchone()
-
-                new_h, new_a = int(score1), int(score2)
-
-                if not existing or (existing["home_goals"] != new_h or existing["away_goals"] != new_a):
-                    cur2.execute(
-                        "INSERT OR REPLACE INTO match_results (match_id, home_goals, away_goals, is_final) VALUES (?, ?, ?, 1)",
-                        (local_id, new_h, new_a)
-                    )
-                    updated += 1
-                break
+        if score1 is not None and score2 is not None:
+            new_h, new_a = int(score1), int(score2)
+            cur2 = conn.cursor()
+            cur2.execute("SELECT home_goals, away_goals, is_final FROM match_results WHERE match_id = ?", (mid,))
+            existing = cur2.fetchone()
+            if not existing or existing["home_goals"] != new_h or existing["away_goals"] != new_a or not existing["is_final"]:
+                cur2.execute(
+                    "INSERT OR REPLACE INTO match_results (match_id, home_goals, away_goals, is_final) VALUES (?, ?, ?, 1)",
+                    (mid, new_h, new_a)
+                )
+                updated_results += 1
 
     conn.commit()
     conn.close()
-    return updated
+
+    if added_matches > 0 or updated_results > 0:
+        print(f"[SYNC] Added/updated {added_matches} matches, {updated_results} results from openfootball JSON")
+    return updated_results
 
 
 async def periodic_result_sync():
@@ -405,8 +447,10 @@ async def periodic_result_sync():
 @app.on_event("startup")
 async def on_startup():
     init_db()
-    # Start background task to automatically sync results from the open source
-    # This runs every 60 seconds so final results appear without manual intervention
+    # Immediately import full schedule (all ~104 matches) + any results from the public JSON.
+    # This ensures missing matches like Qatar-Schweiz are added with correct UTC times.
+    asyncio.create_task(sync_results_from_openfootball())
+    # Background for ongoing automatic result updates (no manual entry needed for finals)
     asyncio.create_task(periodic_result_sync())
 
 @app.get("/", response_class=HTMLResponse)
