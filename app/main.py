@@ -419,6 +419,43 @@ async def sync_results_from_openfootball() -> int:
     return updated_results
 
 
+def cleanup_duplicate_matches() -> int:
+    """Removes duplicate matches (same teams + date) keeping the one with a final result if possible,
+    otherwise the oldest id. This is safe to run to clean up accumulated dups from previous sync bugs.
+    Note: Any predictions tied to deleted duplicate rows will be lost."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Find dups by normalized teams + date (YYYY-MM-DD)
+    # Keep rows that have a final result first, then lowest id
+    cur.execute("""
+        WITH ranked AS (
+            SELECT 
+                m.id,
+                lower(m.home) as h,
+                lower(m.away) as a,
+                substr(m.datetime, 1, 10) as d,
+                (SELECT 1 FROM match_results r 
+                 WHERE r.match_id = m.id AND r.is_final = 1 LIMIT 1) AS has_final,
+                ROW_NUMBER() OVER (
+                    PARTITION BY lower(m.home), lower(m.away), substr(m.datetime, 1, 10)
+                    ORDER BY 
+                        (SELECT 1 FROM match_results r WHERE r.match_id = m.id AND r.is_final = 1 LIMIT 1) DESC,
+                        m.id ASC
+                ) AS rn
+            FROM matches m
+        )
+        DELETE FROM matches 
+        WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
+    """)
+    deleted = cur.rowcount or 0
+    conn.commit()
+    conn.close()
+    if deleted > 0:
+        print(f"[CLEANUP] Removed {deleted} duplicate match rows")
+    return deleted
+
+
 async def periodic_result_sync():
     """Background task that automatically syncs results from the public source
     every 60 seconds. Final results (when the open source JSON is updated after a match)
@@ -817,6 +854,18 @@ def set_group_winner(data: dict):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+@app.post("/api/cleanup-duplicates")
+def cleanup_duplicates():
+    """Admin endpoint to remove duplicate matches caused by earlier sync bugs.
+    Predictions linked only to deleted duplicate rows will be lost.
+    Run this once after deploying the fixed sync logic."""
+    deleted = cleanup_duplicate_matches()
+    # After cleanup, re-sync to make sure we have clean data from source
+    # (this is async but we fire it; results will appear soon)
+    asyncio.create_task(sync_results_from_openfootball())
+    return {"ok": True, "deleted_duplicates": deleted, "message": f"Tog bort {deleted} dubbletter. Synk körs i bakgrunden."}
 
 @app.get("/api/settings")
 def get_settings():

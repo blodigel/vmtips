@@ -90,6 +90,11 @@ Lycka till – må den bäste vinnaren (av bettingen) vinna! ⚽🏆
 
 Byggd för kul på LAN 2026.
 
+**Varning om DB-reset (`rm /data/vmtips.db`):** 
+Tar bort **allt**: alla era tips (Lillen & Stinis), gruppvinnare, turneringsvinnare, manuella live-resultat och historik. 
+Slutresultat från openfootball kommer tillbaka automatiskt via bakgrundssynken. 
+Använd **inte** detta om ni har aktiva bets – prova istället "Rensa dubbletter"-knappen i admin-sektionen (den tar bort duplicerade matchrader utan att nollställa hela DB:n). Reset är bara sista utvägen vid svåra korruptionsproblem.
+
 ---
 
 ## Första gången: Gör det till ett GitHub-repo (superenkelt)

@@ -495,11 +495,18 @@
                 <i class="fa-solid fa-sync"></i>
                 <span>Synka resultat från API (öppen källa)</span>
               </button>
+              <button @click="cleanupDuplicates()" 
+                      class="text-xs px-4 py-1.5 rounded-2xl bg-orange-600 hover:bg-orange-700 active:bg-orange-800 text-white font-medium flex items-center gap-x-2"
+                      title="Ta bort dubbletter skapade av tidigare buggar. Tips och resultat på duplicerade rader kan försvinna.">
+                <i class="fa-solid fa-broom"></i>
+                <span>Rensa dubbletter</span>
+              </button>
             </div>
             <div class="text-xs text-slate-500 mb-3">
               <strong>Automatisk synk:</strong> Bakgrundsjobbet kör var 60:e sekund på servern och hämtar färdiga resultat från gratis öppen datakälla (openfootball/worldcup.json).<br>
               Du behöver inte mata in slutresultat manuellt – när källan uppdateras efter en match dyker det upp automatiskt som SLUTRESULTAT och poäng delas ut.<br>
-              Knappen "Synka" tvingar en omedelbar koll.
+              Knappen "Synka" tvingar en omedelbar koll.<br>
+              <strong>Rensa dubbletter</strong> (orange knapp): Använd en gång efter buggfixar om du har många dubbletter. Tips/resultat på duplicerade rader kan försvinna.
             </div>
 
             <div class="space-y-2">
@@ -884,6 +891,18 @@
             await this.refreshAll()
           } catch (e) {
             await this.refreshAll()
+          }
+        },
+
+        async cleanupDuplicates() {
+          if (!confirm('Rensa dubbletter? Detta tar bort överflödiga matchrader. Eventuella tips/resultat kopplade enbart till duplicerade rader försvinner. Fortsätt?')) return;
+          try {
+            const res = await fetch('/api/cleanup-duplicates', { method: 'POST' });
+            const data = await res.json();
+            alert(data.message || `Tog bort ${data.deleted_duplicates} dubbletter`);
+            await this.refreshAll();
+          } catch (e) {
+            alert('Kunde inte rensa dubbletter');
           }
         },
 
