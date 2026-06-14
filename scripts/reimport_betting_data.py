@@ -17,7 +17,7 @@ The script expects these files in the export dir:
 - group_predictions.json
 - tournament_picks.json
 
-It will look up the new match_ids by date + team names (using the same
+It will look up the new match_ids by date + normalized team names (using the same
 normalization as the app).
 """
 
@@ -112,6 +112,7 @@ def main():
     print(f"Re-importing into {db_path} from {export_dir}...")
 
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row   # <--- IMPORTANT: rows as dicts
     cur = conn.cursor()
 
     # 1. Re-import match predictions
