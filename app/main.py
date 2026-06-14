@@ -248,59 +248,60 @@ def calculate_points(pred_h: int, pred_a: int, act_h: int, act_a: int) -> int:
 
 
 TEAM_ALIASES = {
-    # English variations -> canonical lower for matching
-    "south korea": "south korea",
-    "korea republic": "south korea",
-    "czech republic": "czechia",
-    "czechia": "czechia",
-    "bosnia-herzegovina": "bosnia and herzegovina",
-    "bosnia and herzegovina": "bosnia and herzegovina",
-    "türkiye": "türkiye",
-    "turkey": "türkiye",
-    "côte d'ivoire": "elfenbenskusten",
-    "ivory coast": "elfenbenskusten",
-    "cape verde": "kap verde",
-    "cabo verde": "kap verde",
-    "netherlands": "nederländerna",
-    "sweden": "sverige",
-    "tunisia": "tunisien",
-    "japan": "japan",
-    "spain": "spanien",
-    "germany": "tyskland",
-    "morocco": "marocko",
-    "brazil": "brasilien",
-    "argentina": "argentina",
-    "france": "frankrike",
-    "england": "england",
-    "portugal": "portugal",
-    "belgium": "belgien",
-    "croatia": "kroatien",
-    "uruguay": "uruguay",
-    "paraguay": "paraguay",
-    "mexico": "mexico",
-    "usa": "usa",
-    "united states": "usa",
-    "canada": "canada",
-    "australia": "australien",
-    "saudi arabia": "saudi arabia",
-    "qatar": "qatar",
-    "iran": "iran",
-    "iraq": "iraq",
-    "algeria": "algeriet",
-    "senegal": "senegal",
-    "egypt": "egypten",
-    "ghana": "ghana",
-    "panama": "panama",
-    "italy": "italy",
-    "denmark": "denmark",
-    "poland": "poland",
-    "serbia": "serbia",
-    # Swedish names from our seed (map to english canonical for cross matching)
-    "sverige": "sverige",
-    "tunisien": "tunisien",
-    "nederländerna": "nederländerna",
-    "elfenbenskusten": "elfenbenskusten",
-    "kap verde": "kap verde",
+    # Map all variations (Swedish/English, &/and) to a consistent canonical English name
+    "south korea": "South Korea",
+    "korea republic": "South Korea",
+    "czech republic": "Czechia",
+    "czechia": "Czechia",
+    "bosnia-herzegovina": "Bosnia and Herzegovina",
+    "bosnia and herzegovina": "Bosnia and Herzegovina",
+    "bosnia & herzegovina": "Bosnia and Herzegovina",
+    "türkiye": "Turkey",
+    "turkey": "Turkey",
+    "côte d'ivoire": "Côte d'Ivoire",
+    "ivory coast": "Côte d'Ivoire",
+    "cape verde": "Cape Verde",
+    "cabo verde": "Cape Verde",
+    "netherlands": "Netherlands",
+    "sweden": "Sweden",
+    "tunisia": "Tunisia",
+    "japan": "Japan",
+    "spain": "Spain",
+    "germany": "Germany",
+    "morocco": "Morocco",
+    "brazil": "Brazil",
+    "argentina": "Argentina",
+    "france": "France",
+    "england": "England",
+    "portugal": "Portugal",
+    "belgium": "Belgium",
+    "croatia": "Croatia",
+    "uruguay": "Uruguay",
+    "paraguay": "Paraguay",
+    "mexico": "Mexico",
+    "usa": "USA",
+    "united states": "USA",
+    "canada": "Canada",
+    "australia": "Australia",
+    "saudi arabia": "Saudi Arabia",
+    "qatar": "Qatar",
+    "iran": "Iran",
+    "iraq": "Iraq",
+    "algeria": "Algeria",
+    "senegal": "Senegal",
+    "egypt": "Egypt",
+    "ghana": "Ghana",
+    "panama": "Panama",
+    "italy": "Italy",
+    "denmark": "Denmark",
+    "poland": "Poland",
+    "serbia": "Serbia",
+    # Swedish from seed map to canonical English
+    "sverige": "Sweden",
+    "tunisien": "Tunisia",
+    "nederländerna": "Netherlands",
+    "elfenbenskusten": "Côte d'Ivoire",
+    "kap verde": "Cape Verde",
 }
 
 def normalize_team(name: str) -> str:
@@ -353,6 +354,16 @@ async def sync_results_from_openfootball() -> int:
     conn = get_db()
     cur = conn.cursor()
 
+    # Load existing matches with canonical keys for robust dedup (handles Swedish/English/& vs and)
+    cur.execute("SELECT id, datetime, home, away FROM matches")
+    existing = {}
+    for row in cur.fetchall():
+        d = row["datetime"][:10] if row["datetime"] else ""
+        ch = canonical_name(row["home"])
+        ca = canonical_name(row["away"])
+        key = (d, ch, ca)
+        existing[key] = row["id"]
+
     for r in remote_matches:
         r_date = r.get("date", "")
         stage = r.get("group") or r.get("round", "Grupp")
@@ -363,20 +374,13 @@ async def sync_results_from_openfootball() -> int:
 
         home = r.get("team1", "")
         away = r.get("team2", "")
+        ch = canonical_name(home)
+        ca = canonical_name(away)
+        key = (r_date, ch, ca)
 
-        # Robust existence check by team names (case-insensitive), ignore current datetime
-        # This prevents dups even if previous seeds had different names/casing/datetimes
-        cur.execute("""
-            SELECT id FROM matches 
-            WHERE (lower(home) = lower(?) AND lower(away) = lower(?))
-               OR (lower(home) = lower(?) AND lower(away) = lower(?))
-            LIMIT 1
-        """, (home, away, away, home))
-        row = cur.fetchone()
-
-        if row:
-            mid = row[0]
-            # correct the time/stage on the existing row
+        if key in existing:
+            mid = existing[key]
+            # update time/stage on existing (corrects any previous bad times)
             cur.execute("UPDATE matches SET datetime = ?, stage = ? WHERE id = ?", (dt_str, stage, mid))
         else:
             cur.execute("""
@@ -384,6 +388,7 @@ async def sync_results_from_openfootball() -> int:
                 VALUES (?, ?, ?, ?)
             """, (dt_str, home, away, stage))
             mid = cur.lastrowid
+            existing[key] = mid
             added_matches += 1
 
         # Parse and upsert result if present
@@ -403,8 +408,8 @@ async def sync_results_from_openfootball() -> int:
             new_h, new_a = int(score1), int(score2)
             cur2 = conn.cursor()
             cur2.execute("SELECT home_goals, away_goals, is_final FROM match_results WHERE match_id = ?", (mid,))
-            existing = cur2.fetchone()
-            if not existing or existing["home_goals"] != new_h or existing["away_goals"] != new_a or not existing.get("is_final"):
+            existing_res = cur2.fetchone()
+            if not existing_res or existing_res["home_goals"] != new_h or existing_res["away_goals"] != new_a or not existing_res.get("is_final"):
                 cur2.execute(
                     "INSERT OR REPLACE INTO match_results (match_id, home_goals, away_goals, is_final) VALUES (?, ?, ?, 1)",
                     (mid, new_h, new_a)
@@ -416,39 +421,56 @@ async def sync_results_from_openfootball() -> int:
 
     if added_matches > 0 or updated_results > 0:
         print(f"[SYNC] Added/updated {added_matches} matches, {updated_results} results from openfootball JSON")
+    # Always run dedup at end of sync to clean any lingering from name variations
+    cleanup_duplicate_matches()
     return updated_results
+
+# Call cleanup on startup too, after initial sync task starts (it will run soon)
+# The task is async, but cleanup is safe to call here too if needed.
 
 
 def cleanup_duplicate_matches() -> int:
-    """Removes duplicate matches (same teams + date) keeping the one with a final result if possible,
-    otherwise the oldest id. This is safe to run to clean up accumulated dups from previous sync bugs.
-    Note: Any predictions tied to deleted duplicate rows will be lost."""
+    """Removes duplicate matches using canonical names (handles & vs and, Swedish/English).
+    Keeps the one with a final result if possible, otherwise the oldest id.
+    Any predictions tied only to deleted dups will be lost."""
     conn = get_db()
     cur = conn.cursor()
 
-    # Find dups by normalized teams + date (YYYY-MM-DD)
-    # Keep rows that have a final result first, then lowest id
-    cur.execute("""
-        WITH ranked AS (
-            SELECT 
-                m.id,
-                lower(m.home) as h,
-                lower(m.away) as a,
-                substr(m.datetime, 1, 10) as d,
-                (SELECT 1 FROM match_results r 
-                 WHERE r.match_id = m.id AND r.is_final = 1 LIMIT 1) AS has_final,
-                ROW_NUMBER() OVER (
-                    PARTITION BY lower(m.home), lower(m.away), substr(m.datetime, 1, 10)
-                    ORDER BY 
-                        (SELECT 1 FROM match_results r WHERE r.match_id = m.id AND r.is_final = 1 LIMIT 1) DESC,
-                        m.id ASC
-                ) AS rn
-            FROM matches m
-        )
-        DELETE FROM matches 
-        WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
-    """)
-    deleted = cur.rowcount or 0
+    cur.execute("SELECT id, datetime, home, away FROM matches ORDER BY id")
+    rows = cur.fetchall()
+
+    groups = defaultdict(list)
+    for r in rows:
+        d = (r["datetime"] or "")[:10]
+        ch = canonical_name(r["home"])
+        ca = canonical_name(r["away"])
+        key = (d, ch, ca)
+        groups[key].append(dict(r))
+
+    to_delete = []
+    for key, items in groups.items():
+        if len(items) <= 1:
+            continue
+        # prefer final result
+        best = None
+        for it in items:
+            cur.execute("SELECT 1 FROM match_results WHERE match_id = ? AND is_final=1 LIMIT 1", (it["id"],))
+            if cur.fetchone():
+                best = it
+                break
+        if not best:
+            best = min(items, key=lambda x: x["id"])
+        best_id = best["id"]
+        for it in items:
+            if it["id"] != best_id:
+                to_delete.append(it["id"])
+
+    if to_delete:
+        cur.executemany("DELETE FROM matches WHERE id = ?", [(d,) for d in to_delete])
+        # also clean orphaned predictions/results
+        cur.executemany("DELETE FROM predictions WHERE match_id = ?", [(d,) for d in to_delete])
+        cur.executemany("DELETE FROM match_results WHERE match_id = ?", [(d,) for d in to_delete])
+    deleted = len(to_delete)
     conn.commit()
     conn.close()
     if deleted > 0:
