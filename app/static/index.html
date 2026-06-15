@@ -542,6 +542,42 @@
               </template>
             </div>
             <div class="text-xs text-slate-400 mt-2">Synka-knappen uppdaterar poängen automatiskt för alla matchade avslutade matcher.</div>
+
+            <!-- Manuell inmatning i efterhand -->
+            <div class="mt-4 border-t pt-4">
+              <div class="text-sm font-medium mb-2">Lägg till/uppdatera resultat i efterhand (för matcher som inte laddats automatiskt eller behöver korrigeras)</div>
+              <div class="flex flex-wrap gap-2 items-end">
+                <div class="flex-1 min-w-[200px]">
+                  <div class="text-xs mb-1">Välj match eller ange ID</div>
+                  <select x-model="manual.match_id" class="w-full border rounded-2xl px-3 py-1 text-sm">
+                    <option value="">-- Välj från lista --</option>
+                    <template x-for="m in matches" :key="m.id">
+                      <option :value="m.id" x-text="m.home + ' – ' + m.away + ' (' + m.datetime.substring(0,10) + ')' + (m.result ? ' [har res]' : '')"></option>
+                    </template>
+                  </select>
+                  <input type="number" x-model.number="manual.match_id" placeholder="Eller match-ID" class="mt-1 w-full border rounded-2xl px-3 py-1 text-sm">
+                </div>
+                <div>
+                  <div class="text-xs mb-1">Hemma</div>
+                  <input type="number" x-model.number="manual.home_goals" class="w-20 border rounded-2xl px-3 py-1 text-sm">
+                </div>
+                <div>
+                  <div class="text-xs mb-1">Borta</div>
+                  <input type="number" x-model.number="manual.away_goals" class="w-20 border rounded-2xl px-3 py-1 text-sm">
+                </div>
+                <div>
+                  <div class="text-xs mb-1">Typ</div>
+                  <select x-model="manual.is_final" class="border rounded-2xl px-3 py-1 text-sm">
+                    <option :value="true">Slutgiltigt (räknas i poäng)</option>
+                    <option :value="false">Live / provisoriskt</option>
+                  </select>
+                </div>
+                <div>
+                  <button @click="manualSaveResult()" class="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white px-4 py-1 rounded-2xl text-sm h-9">Spara resultat</button>
+                </div>
+              </div>
+              <div class="text-[10px] text-slate-400 mt-1">Använd detta för att manuellt lägga in resultat för matcher som inte kommit in via API eller som behöver korrigeras i efterhand.</div>
+            </div>
           </div>
 
           <!-- Set tournament winner -->
@@ -601,6 +637,7 @@
         newMatch: { datetime: '', home: '', away: '', stage: 'Grupp' },
         tempResult: {},
         actualChampionInput: '',
+        manual: { match_id: '', home_goals: 0, away_goals: 0, is_final: true },
         allTeams: [
           'Sverige', 'Nederländerna', 'Japan', 'Tunisien',
           'Brasilien', 'Argentina', 'Tyskland', 'Spanien', 'Frankrike', 'England',
@@ -903,6 +940,33 @@
             await this.refreshAll();
           } catch (e) {
             alert('Kunde inte rensa dubbletter');
+          }
+        },
+
+        async manualSaveResult() {
+          const m = this.manual;
+          if (!m.match_id) {
+            alert('Ange eller välj ett match-ID');
+            return;
+          }
+          const hid = parseInt(m.home_goals);
+          const aid = parseInt(m.away_goals);
+          if (isNaN(hid) || isNaN(aid)) {
+            alert('Ange giltiga mål (heltal)');
+            return;
+          }
+          try {
+            const url = `/api/matches/${m.match_id}/result?is_final=${m.is_final}`;
+            await fetch(url, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ home_goals: hid, away_goals: aid })
+            });
+            alert('Resultat sparat manuellt');
+            this.manual = { match_id: '', home_goals: 0, away_goals: 0, is_final: true };
+            await this.refreshAll();
+          } catch (e) {
+            alert('Kunde inte spara manuellt resultat');
           }
         },
 
