@@ -304,7 +304,7 @@ TEAM_ALIASES = {
     "kap verde": "Cape Verde",
 }
 
-def normalize_team(name: str) -> str:
+def canonical_name(name: str) -> str:
     if not name:
         return ""
     key = name.lower().strip()
@@ -496,10 +496,12 @@ async def periodic_result_sync():
 @app.on_event("startup")
 async def on_startup():
     init_db()
-    # Immediately import full schedule (all ~104 matches) + any results from the public JSON.
-    # This ensures missing matches like Qatar-Schweiz are added with correct UTC times.
-    asyncio.create_task(sync_results_from_openfootball())
-    # Background for ongoing automatic result updates (no manual entry needed for finals)
+    # Block on full schedule import from the public JSON on startup (especially after DB reset).
+    # This ensures the complete list of matches with correct UTC times is loaded automatically,
+    # without needing the "Synka" button or waiting for background.
+    # Results (when available in the JSON) are also pulled.
+    await sync_results_from_openfootball()
+    # Then start background for ongoing updates during the tournament
     asyncio.create_task(periodic_result_sync())
 
 @app.get("/", response_class=HTMLResponse)

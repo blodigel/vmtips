@@ -503,10 +503,10 @@
               </button>
             </div>
             <div class="text-xs text-slate-500 mb-3">
-              <strong>Automatisk synk:</strong> Bakgrundsjobbet kör var 60:e sekund på servern och hämtar färdiga resultat från gratis öppen datakälla (openfootball/worldcup.json).<br>
-              Du behöver inte mata in slutresultat manuellt – när källan uppdateras efter en match dyker det upp automatiskt som SLUTRESULTAT och poäng delas ut.<br>
-              Knappen "Synka" tvingar en omedelbar koll.<br>
-              <strong>Rensa dubbletter</strong> (orange knapp): Använd en gång efter buggfixar om du har många dubbletter. Tips/resultat på duplicerade rader kan försvinna.
+              <strong>Automatisk inläsning:</strong> Vid uppstart (särskilt efter DB-reset) läses hela schemat + eventuella resultat in automatiskt från openfootball JSON:en (med korrekta UTC-tider och dedup). Inga dubbletter ska uppstå längre.<br>
+              Bakgrundssynk körs dessutom var 60:e sekund för att plocka upp nya slutresultat.<br>
+              Knappen "Synka" är nu mest för att tvinga en extra uppdatering om du vill.<br>
+              <strong>Rensa dubbletter</strong> (orange knapp): Använd om du har gamla dubbletter från innan fixarna. Tips/resultat på duplicerade rader kan försvinna.
             </div>
 
             <div class="space-y-2">
