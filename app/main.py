@@ -8,6 +8,7 @@ import sqlite3
 import json
 import os
 import asyncio
+from collections import defaultdict
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List
