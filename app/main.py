@@ -409,7 +409,14 @@ async def sync_results_from_openfootball() -> int:
             cur2 = conn.cursor()
             cur2.execute("SELECT home_goals, away_goals, is_final FROM match_results WHERE match_id = ?", (mid,))
             existing_res = cur2.fetchone()
-            if not existing_res or existing_res["home_goals"] != new_h or existing_res["away_goals"] != new_a or not existing_res.get("is_final"):
+            if existing_res:
+                try:
+                    is_final = bool(existing_res["is_final"])
+                except (KeyError, IndexError):
+                    is_final = True  # old row without column or migration not run yet
+            else:
+                is_final = False
+            if not existing_res or existing_res["home_goals"] != new_h or existing_res["away_goals"] != new_a or not is_final:
                 cur2.execute(
                     "INSERT OR REPLACE INTO match_results (match_id, home_goals, away_goals, is_final) VALUES (?, ?, ?, 1)",
                     (mid, new_h, new_a)
