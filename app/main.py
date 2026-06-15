@@ -159,11 +159,12 @@ def init_db():
 
     conn.commit()
 
-    # Seed if empty
-    cur.execute("SELECT COUNT(*) FROM matches")
-    if cur.fetchone()[0] == 0:
-        seed_data(conn)
-        conn.commit()
+    # Seeding of matches from the small hardcoded list is disabled.
+    # All matches (full 104 schedule with correct UTC times and deduplication) now come
+    # exclusively from the public openfootball JSON. This is triggered automatically
+    # on startup (via await in on_startup) and periodically in background.
+    # This is the clean way: after DB reset, everything is loaded fresh from the API source
+    # without any manual "Synka" for the initial full schedule.
 
     conn.close()
 
