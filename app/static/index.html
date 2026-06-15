@@ -543,6 +543,42 @@
             </div>
             <div class="text-xs text-slate-400 mt-2">Synka-knappen uppdaterar poängen automatiskt för alla matchade avslutade matcher.</div>
 
+            <!-- Manuell bett i efterhand -->
+            <div class="mt-4 border-t pt-4">
+              <div class="text-sm font-medium mb-2">Lägg till bett i efterhand (för Lillen eller Stinis på matcher som redan spelats eller inte laddats)</div>
+              <div class="flex flex-wrap gap-2 items-end">
+                <div class="flex-1 min-w-[200px]">
+                  <div class="text-xs mb-1">Välj match eller ange ID</div>
+                  <select x-model="manualBet.match_id" class="w-full border rounded-2xl px-3 py-1 text-sm">
+                    <option value="">-- Välj från lista --</option>
+                    <template x-for="m in matches" :key="m.id">
+                      <option :value="m.id" x-text="m.home + ' – ' + m.away + ' (' + m.datetime.substring(0,10) + ')'"></option>
+                    </template>
+                  </select>
+                  <input type="number" x-model.number="manualBet.match_id" placeholder="Eller match-ID" class="mt-1 w-full border rounded-2xl px-3 py-1 text-sm">
+                </div>
+                <div>
+                  <div class="text-xs mb-1">För vem</div>
+                  <select x-model="manualBet.user" class="border rounded-2xl px-3 py-1 text-sm">
+                    <option value="Lillen">Lillen</option>
+                    <option value="Stinis">Stinis</option>
+                  </select>
+                </div>
+                <div>
+                  <div class="text-xs mb-1">Hemma</div>
+                  <input type="number" x-model.number="manualBet.home_goals" class="w-20 border rounded-2xl px-3 py-1 text-sm">
+                </div>
+                <div>
+                  <div class="text-xs mb-1">Borta</div>
+                  <input type="number" x-model.number="manualBet.away_goals" class="w-20 border rounded-2xl px-3 py-1 text-sm">
+                </div>
+                <div>
+                  <button @click="manualSaveBet()" class="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-4 py-1 rounded-2xl text-sm h-9">Spara bett</button>
+                </div>
+              </div>
+              <div class="text-[10px] text-slate-400 mt-1">Använd detta för att registrera bets i efterhand. Det kringgår tidslåsningen.</div>
+            </div>
+
             <!-- Manuell inmatning i efterhand -->
             <div class="mt-4 border-t pt-4">
               <div class="text-sm font-medium mb-2">Lägg till/uppdatera resultat i efterhand (för matcher som inte laddats automatiskt eller behöver korrigeras)</div>
@@ -638,6 +674,7 @@
         tempResult: {},
         actualChampionInput: '',
         manual: { match_id: '', home_goals: 0, away_goals: 0, is_final: true },
+        manualBet: { match_id: '', user: 'Lillen', home_goals: 0, away_goals: 0 },
         allTeams: [
           'Sverige', 'Nederländerna', 'Japan', 'Tunisien',
           'Brasilien', 'Argentina', 'Tyskland', 'Spanien', 'Frankrike', 'England',
@@ -967,6 +1004,37 @@
             await this.refreshAll();
           } catch (e) {
             alert('Kunde inte spara manuellt resultat');
+          }
+        },
+
+        async manualSaveBet() {
+          const b = this.manualBet;
+          if (!b.match_id) {
+            alert('Ange eller välj ett match-ID');
+            return;
+          }
+          const hid = parseInt(b.home_goals);
+          const aid = parseInt(b.away_goals);
+          if (isNaN(hid) || isNaN(aid)) {
+            alert('Ange giltiga mål (heltal)');
+            return;
+          }
+          try {
+            await fetch('/api/admin/prediction', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                user: b.user,
+                match_id: b.match_id,
+                home_goals: hid,
+                away_goals: aid
+              })
+            });
+            alert('Bett sparat i efterhand för ' + b.user);
+            this.manualBet = { match_id: '', user: 'Lillen', home_goals: 0, away_goals: 0 };
+            await this.refreshAll();
+          } catch (e) {
+            alert('Kunde inte spara bett');
           }
         },
 

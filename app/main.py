@@ -661,6 +661,30 @@ def save_prediction(p: PredictionCreate):
     conn.close()
     return {"ok": True}
 
+
+@app.post("/api/admin/prediction")
+def save_admin_prediction(data: dict):
+    """Admin endpoint to record bets in afterhand (bypasses lock).
+    Body: {user, match_id, home_goals, away_goals}
+    """
+    user = data.get("user")
+    match_id = data.get("match_id")
+    home_goals = data.get("home_goals")
+    away_goals = data.get("away_goals")
+    if user not in USERS or match_id is None or home_goals is None or away_goals is None:
+        raise HTTPException(400, "Ogiltig data")
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT OR REPLACE INTO predictions 
+           (user, match_id, home_goals, away_goals) 
+           VALUES (?, ?, ?, ?)""",
+        (user, match_id, home_goals, away_goals)
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
 @app.get("/api/predictions")
 def get_predictions(user: Optional[str] = None):
     conn = get_db()
