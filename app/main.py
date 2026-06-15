@@ -164,7 +164,8 @@ def init_db():
     # exclusively from the public openfootball JSON. This is triggered automatically
     # on startup (via await in on_startup) and periodically in background.
     # This is the clean way: after DB reset, everything is loaded fresh from the API source
-    # without any manual "Synka" for the initial full schedule.
+    # without any manual "Synka" for the initial full schedule. When playoffs start, new
+    # matches will be added automatically as the JSON updates.
 
     conn.close()
 
