@@ -774,7 +774,11 @@
 
         formatDateShort(iso) {
           try {
-            const d = new Date(iso)
+            let d = new Date(iso)
+            // Treat naive ISO strings (no Z/+/- after date) as UTC to get correct local time display
+            if (iso && !/[Z+-]/.test(iso.slice(10))) {
+              d = new Date(iso + 'Z')
+            }
             return d.toLocaleDateString('sv-SE', { month: 'short', day: 'numeric' }) + ' ' + 
                    d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
           } catch {

@@ -331,6 +331,7 @@ def parse_match_kickoff_utc(date_str: str, time_str: str) -> str:
         # local = UTC + offset (offset is negative for western zones)
         # UTC = local - offset
         utc_dt = local_dt - timedelta(hours=offset)
+        utc_dt = utc_dt.replace(tzinfo=timezone.utc)
         return utc_dt.isoformat()
     except Exception:
         return f"{date_str}T00:00:00"
@@ -581,7 +582,7 @@ def get_matches():
             if m["result"] and m["result"].get("is_final"):
                 m["status"] = "finished"
                 m["prediction_locked"] = True
-            elif (m["result"] and not m["result"].get("is_final")) or now >= match_dt:
+            elif now >= match_dt:
                 m["status"] = "live"
                 m["prediction_locked"] = True
             elif now >= match_dt - lock_buffer:
@@ -646,7 +647,9 @@ def save_prediction(p: PredictionCreate):
     if row:
         try:
             match_dt = datetime.fromisoformat(row["datetime"])
-            if datetime.now() >= match_dt:
+            if match_dt.tzinfo is None:
+                match_dt = match_dt.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) >= match_dt:
                 raise HTTPException(403, "Tippning är stängd – matchen har startat")
         except Exception:
             pass
