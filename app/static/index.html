@@ -438,6 +438,10 @@
                         <i class="fa-solid fa-save"></i>
                         <span>Spara</span>
                       </button>
+                      <span x-show="savedBets[match.id]" 
+                            class="mt-5 self-end ml-2 text-emerald-600 text-sm font-medium flex items-center gap-x-1">
+                        ✓ Sparat!
+                      </span>
                     </div>
 
                     <!-- Other user's pick -->
@@ -574,6 +578,7 @@
                 </div>
                 <div>
                   <button @click="manualSaveBet()" class="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-4 py-1 rounded-2xl text-sm h-9">Spara bett</button>
+                  <span x-show="savedManualBet" class="text-emerald-600 text-sm ml-2 self-end">✓ Sparat!</span>
                 </div>
               </div>
               <div class="text-[10px] text-slate-400 mt-1">Använd detta för att registrera bets i efterhand. Det kringgår tidslåsningen.</div>
@@ -675,6 +680,8 @@
         actualChampionInput: '',
         manual: { match_id: '', home_goals: 0, away_goals: 0, is_final: true },
         manualBet: { match_id: '', user: 'Lillen', home_goals: 0, away_goals: 0 },
+        savedBets: {},
+        savedManualBet: false,
         allTeams: [
           'Sverige', 'Nederländerna', 'Japan', 'Tunisien',
           'Brasilien', 'Argentina', 'Tyskland', 'Spanien', 'Frankrike', 'England',
@@ -848,7 +855,7 @@
           if (!pred) return
 
           try {
-            await fetch('/api/predictions', {
+            const res = await fetch('/api/predictions', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -858,9 +865,17 @@
                 away_goals: pred.away_goals
               })
             })
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}))
+              throw new Error(err.message || 'Server error')
+            }
+            this.savedBets[match.id] = true
+            setTimeout(() => {
+              delete this.savedBets[match.id]
+            }, 2200)
             if (!silent) await this.refreshAll()
           } catch (e) {
-            alert('Kunde inte spara tipset')
+            alert('Kunde inte spara tipset: ' + (e.message || ''))
           }
         },
 
@@ -1034,7 +1049,8 @@
                 away_goals: aid
               })
             });
-            alert('Bett sparat i efterhand för ' + b.user);
+            this.savedManualBet = true;
+            setTimeout(() => { this.savedManualBet = false }, 2200);
             this.manualBet = { match_id: '', user: 'Lillen', home_goals: 0, away_goals: 0 };
             await this.refreshAll();
           } catch (e) {
