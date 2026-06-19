@@ -7,14 +7,33 @@
 
 ## 1. Create the Basic Auth Secret
 
-Run this locally (choose your own username and password; you can add multiple users):
+The secret must contain a file called `auth` with htpasswd-formatted lines.
+
+### Recommended way (interactive, most reliable):
 
 ```bash
-# Example for one user (replace username and password)
-echo "lillen:$(openssl passwd -apr1 'dittlosenordhär')" | kubectl create secret generic vmtips-basic-auth --from-file=auth=/dev/stdin --namespace default
+# Create htpasswd file (you will be prompted for password)
+htpasswd -c auth lillen
 
-# For multiple users (e.g. Lillen and Stinis):
-echo -e "lillen:$(openssl passwd -apr1 'lillenslosenord')\nstinis:$(openssl passwd -apr1 'stinislosenord')" | kubectl create secret generic vmtips-basic-auth --from-file=auth=/dev/stdin --namespace default
+# If you want to add Stinis too:
+htpasswd auth stinis
+
+# Create the secret from the file
+kubectl create secret generic vmtips-basic-auth \
+  --from-file=auth=auth \
+  --namespace default
+
+# Clean up the local file
+rm auth
+```
+
+### Alternative one-liner (if you don't have htpasswd installed):
+
+```bash
+echo "lillen:$(openssl passwd -apr1 'YOUR_PASSWORD_HERE')" | \
+  kubectl create secret generic vmtips-basic-auth \
+  --from-file=auth=/dev/stdin \
+  --namespace default
 ```
 
 Verify:
@@ -37,19 +56,18 @@ kubectl get ingress vmtips -n default
 kubectl get middleware vmtips-basic-auth -n default
 ```
 
-Check logs:
+Check Traefik logs (adjust namespace if your Traefik is not in `traefik`):
 ```bash
-kubectl logs -l app=traefik -n traefik  # adjust namespace if different
+kubectl logs -l app=traefik -n traefik --tail=50
 ```
 
 ## 4. Test
 
-Open https://vm.blodsnigel.se (or http if no TLS yet).
+Once your DNS for `vm.blodsnigel.se` is pointing to your Traefik (LoadBalancer/NodePort/etc.), open the URL in the browser.
 
-You should get a browser Basic Auth prompt.
+You should get a Basic Auth prompt.
 
-Username: lillen (or whatever you chose)
-Password: the one you set.
+Username + password = whatever you put in the secret.
 
 ## Notes
 

@@ -6,7 +6,7 @@ metadata:
   annotations:
     # Traefik routing
     traefik.ingress.kubernetes.io/router.entrypoints: web
-    # Basic auth middleware (create secret first, see k8s/README-traefik.md)
+    # Basic auth middleware (create secret first)
     traefik.ingress.kubernetes.io/router.middlewares: default-vmtips-basic-auth@kubernetescrd
     # For HTTPS later (uncomment and add cert):
     # traefik.ingress.kubernetes.io/router.entrypoints: websecure
@@ -23,4 +23,3 @@ spec:
                 name: vmtips
                 port:
                   number: 80
-EOF
