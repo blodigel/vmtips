@@ -1,0 +1,10 @@
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: vmtips-basic-auth
+  namespace: default
+spec:
+  basicAuth:
+    secret: vmtips-basic-auth
+    realm: "VM-Tips"
+    removeHeader: false

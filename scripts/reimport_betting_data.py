@@ -120,10 +120,12 @@ def main():
         predictions = json.load(f)
 
     imported_preds = 0
+    skipped = 0
     for p in predictions:
         new_match_id = find_match_id(cur, p["datetime"], p["home"], p["away"])
         if new_match_id is None:
-            print(f"WARNING: Could not find match for prediction: {p['home']} vs {p['away']} on {p['datetime'][:10]}")
+            print(f"WARNING: Could not find match for prediction: {p.get('home','?')} vs {p.get('away','?')} on {p.get('datetime','?')[:10]}")
+            skipped += 1
             continue
 
         cur.execute("""
@@ -132,7 +134,7 @@ def main():
         """, (p["user"], new_match_id, p["home_goals"], p["away_goals"]))
         imported_preds += 1
 
-    print(f"Imported {imported_preds} match predictions.")
+    print(f"Imported {imported_preds} match predictions (skipped {skipped}).")
 
     # 2. Re-import group predictions
     with open(group_file, encoding="utf-8") as f:
