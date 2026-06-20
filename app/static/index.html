@@ -353,14 +353,14 @@
                     
                     <div class="text-xs border-l pl-4">
                       <div class="text-slate-500 mb-px">Ditt tips</div>
-                      <template x-if="match.predictions && match.predictions[currentUser]">
+                      <template x-if="getCurrentPrediction(match)">
                         <div class="font-semibold">
-                          <span x-text="match.predictions[currentUser].home_goals"></span>–<span x-text="match.predictions[currentUser].away_goals"></span>
+                          <span x-text="getCurrentPrediction(match).home_goals"></span>–<span x-text="getCurrentPrediction(match).away_goals"></span>
                           <span class="ml-2 inline-block px-2 py-px text-[10px] bg-emerald-100 text-emerald-700 rounded font-medium"
                                 x-text="getMatchPoints(match, currentUser) + 'p'"></span>
                         </div>
                       </template>
-                      <template x-if="!(match.predictions && match.predictions[currentUser])">
+                      <template x-if="!getCurrentPrediction(match)">
                         <div class="text-slate-400">Inget tips</div>
                       </template>
                     </div>
@@ -382,10 +382,10 @@
 
                     <div class="text-xs text-slate-500">
                       Ditt tips: 
-                      <template x-if="match.predictions && match.predictions[currentUser]">
-                        <span class="font-medium text-slate-700" x-text="match.predictions[currentUser].home_goals + '–' + match.predictions[currentUser].away_goals"></span>
+                      <template x-if="getCurrentPrediction(match)">
+                        <span class="font-medium text-slate-700" x-text="getCurrentPrediction(match).home_goals + '–' + getCurrentPrediction(match).away_goals"></span>
                       </template>
-                      <template x-if="!(match.predictions && match.predictions[currentUser])">
+                      <template x-if="!getCurrentPrediction(match)">
                         <span class="text-slate-400">–</span>
                       </template>
                     </div>
@@ -682,6 +682,7 @@
         manualBet: { match_id: '', user: 'Lillen', home_goals: 0, away_goals: 0 },
         savedBets: {},
         savedManualBet: false,
+        myPredictions: {},
         allTeams: [
           'Sverige', 'Nederländerna', 'Japan', 'Tunisien',
           'Brasilien', 'Argentina', 'Tyskland', 'Spanien', 'Frankrike', 'England',
@@ -696,27 +697,18 @@
 
         init() {
           this.refreshAll()
-          // Auto refresh leaderboard + matches every 20s for live scores and updates
+          // Poll UI data every 30s. Server-side background task already syncs results from openfootball every 60s.
+          // We no longer spam /api/sync-results from the browser on a timer (that caused extra load + timing races).
           setInterval(() => {
             this.fetchMatches()
             this.fetchLeaderboard()
-          }, 20000)
-
-          // Auto call sync-results every 15s to pull latest from open source (finals + when community updates)
-          setInterval(() => {
-            fetch('/api/sync-results', { method: 'POST' })
-              .then(() => {
-                // After sync, refresh to pick up new live/final scores
-                this.fetchMatches()
-                this.fetchLeaderboard()
-              })
-              .catch(() => {})
-          }, 15000)
+          }, 30000)
         },
 
         switchUser(user) {
           this.currentUser = user
           localStorage.setItem('currentUser', user)
+          this.myPredictions = {} // avoid carrying edits from other user; fall back to server data for new user
         },
 
         getOtherUser() {
@@ -733,10 +725,32 @@
           ])
         },
 
-        async fetchMatches() {
+        async fetchMatches(mergeLocal = false) {
           try {
             const res = await fetch('/api/matches')
-            this.matches = await res.json()
+            let serverMatches = await res.json()
+
+            if (mergeLocal) {
+              // After a save, ensure our local value is visible in the just-loaded data (survives this.matches=)
+              serverMatches = serverMatches.map(m => {
+                const local = this.myPredictions[m.id]
+                if (local) {
+                  if (!m.predictions) m.predictions = {}
+                  m.predictions[this.currentUser] = { ...local }
+                }
+                return m
+              })
+            } else {
+              // Normal poll/load: seed myPredictions from server for this user (if we have no active local edit)
+              // This makes saved bets appear in inputs immediately, and survive user switches after polls.
+              serverMatches.forEach(m => {
+                if (!this.myPredictions[m.id] && m.predictions && m.predictions[this.currentUser]) {
+                  this.myPredictions[m.id] = { ...m.predictions[this.currentUser] }
+                }
+              })
+            }
+
+            this.matches = serverMatches
           } catch (e) {
             console.error(e)
           }
@@ -812,6 +826,8 @@
         },
 
         getCurrentPrediction(match) {
+          const local = this.myPredictions[match.id]
+          if (local) return local
           if (!match.predictions) return null
           return match.predictions[this.currentUser]
         },
@@ -832,9 +848,10 @@
             h = avg; a = avg
           }
 
-          // optimistic update
+          // optimistic update (both local stable state and current object)
           if (!match.predictions) match.predictions = {}
           match.predictions[this.currentUser] = { home_goals: h, away_goals: a }
+          this.myPredictions[match.id] = { home_goals: h, away_goals: a }
 
           // auto save immediately for speed
           this.savePrediction(match, true)
@@ -842,6 +859,16 @@
 
         updatePredictionScore(match, side, val) {
           const num = parseInt(val) || 0
+          const mid = match.id
+          // Write to stable myPredictions so polls (this.matches = ...) can't nuke what user is typing
+          if (!this.myPredictions[mid]) {
+            const server = match.predictions && match.predictions[this.currentUser]
+            this.myPredictions[mid] = server ? { ...server } : { home_goals: 0, away_goals: 0 }
+          }
+          if (side === 'home') this.myPredictions[mid].home_goals = num
+          else this.myPredictions[mid].away_goals = num
+
+          // Also mirror to current match object (for active button states etc until next replace)
           if (!match.predictions) match.predictions = {}
           if (!match.predictions[this.currentUser]) {
             match.predictions[this.currentUser] = { home_goals: 0, away_goals: 0 }
@@ -854,34 +881,50 @@
           const pred = this.getCurrentPrediction(match)
           if (!pred) return
 
+          const mid = match.id
+          // Ensure our numbers are in stable state before/after the async POST
+          this.myPredictions[mid] = { home_goals: pred.home_goals || 0, away_goals: pred.away_goals || 0 }
+          if (!match.predictions) match.predictions = {}
+          match.predictions[this.currentUser] = { ...this.myPredictions[mid] }
+
           try {
             const res = await fetch('/api/predictions', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                match_id: match.id,
+                match_id: mid,
                 user: this.currentUser,
-                home_goals: pred.home_goals,
-                away_goals: pred.away_goals
+                home_goals: this.myPredictions[mid].home_goals,
+                away_goals: this.myPredictions[mid].away_goals
               })
             })
             if (!res.ok) {
               const err = await res.json().catch(() => ({}))
               throw new Error(err.message || 'Server error')
             }
-            this.savedBets[match.id] = true
+            this.savedBets[mid] = true
             setTimeout(() => {
-              delete this.savedBets[match.id]
+              delete this.savedBets[mid]
             }, 2200)
-            if (!silent) await this.refreshAll()
+            if (!silent) {
+              // Light refresh: fetch matches but force-inject our just-saved value so it can't disappear.
+              // Avoid full refreshAll() on every save (was causing extra races and unnecessary work).
+              await this.fetchMatches(true)
+            }
           } catch (e) {
             alert('Kunde inte spara tipset: ' + (e.message || ''))
           }
         },
 
         getMatchPoints(match, user) {
-          if (!match.result || !match.result.is_final || !match.predictions || !match.predictions[user]) return 0
-          const p = match.predictions[user]
+          if (!match.result || !match.result.is_final) return 0
+          let p = null
+          if (user === this.currentUser && this.myPredictions[match.id]) {
+            p = this.myPredictions[match.id]
+          } else if (match.predictions && match.predictions[user]) {
+            p = match.predictions[user]
+          }
+          if (!p) return 0
           const r = match.result
           // replicate backend logic client side for display
           let pts = 0

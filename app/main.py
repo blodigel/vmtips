@@ -355,18 +355,26 @@ async def sync_results_from_openfootball() -> int:
         return 0
 
     remote_matches = data.get("matches", [])
+
+    # Always start from a clean deduped state. This prevents result from being attached to a "loser" dup row,
+    # and ensures any prior bets on dup rows have been migrated before we decide which id to target.
+    cleanup_duplicate_matches()
+
     conn = get_db()
     cur = conn.cursor()
 
     # Load existing matches with canonical keys for robust dedup (handles Swedish/English/& vs and)
+    # Use team pair only (no date) because same two teams don't play twice in the tournament.
+    # Prefer the highest id for a key as the "primary" so that we consistently target the same survivor
+    # row for updates/results. Cleanup at end (and start) will remove the rest and migrate data/bets.
     cur.execute("SELECT id, datetime, home, away FROM matches")
     existing = {}
     for row in cur.fetchall():
-        d = row["datetime"][:10] if row["datetime"] else ""
         ch = canonical_name(row["home"])
         ca = canonical_name(row["away"])
-        key = (d, ch, ca)
-        existing[key] = row["id"]
+        key = tuple(sorted([ch, ca]))
+        if key not in existing or row["id"] > existing[key]:
+            existing[key] = row["id"]
 
     for r in remote_matches:
         r_date = r.get("date", "")
@@ -380,12 +388,12 @@ async def sync_results_from_openfootball() -> int:
         away = r.get("team2", "")
         ch = canonical_name(home)
         ca = canonical_name(away)
-        key = (r_date, ch, ca)
+        key = tuple(sorted([ch, ca]))
 
         if key in existing:
             mid = existing[key]
-            # update time/stage on existing (corrects any previous bad times)
-            cur.execute("UPDATE matches SET datetime = ?, stage = ? WHERE id = ?", (dt_str, stage, mid))
+            # update time/stage and ensure canonical English names from JSON
+            cur.execute("UPDATE matches SET datetime = ?, stage = ?, home = ?, away = ? WHERE id = ?", (dt_str, stage, home, away, mid))
         else:
             cur.execute("""
                 INSERT INTO matches (datetime, home, away, stage)
@@ -432,7 +440,7 @@ async def sync_results_from_openfootball() -> int:
 
     if added_matches > 0 or updated_results > 0:
         print(f"[SYNC] Added/updated {added_matches} matches, {updated_results} results from openfootball JSON")
-    # Always run dedup at end of sync to clean any lingering from name variations
+    # Always run dedup at end of sync too (catches anything from this pass + ensures bets migrated before result use)
     cleanup_duplicate_matches()
     return updated_results
 
@@ -442,8 +450,8 @@ async def sync_results_from_openfootball() -> int:
 
 def cleanup_duplicate_matches() -> int:
     """Removes duplicate matches using canonical names (handles & vs and, Swedish/English).
-    Keeps the one with a final result if possible, otherwise the oldest id.
-    Any predictions tied only to deleted dups will be lost."""
+    Migrates predictions and results to the best row (prefers one with final result).
+    This preserves bets even if they were on a duplicate row."""
     conn = get_db()
     cur = conn.cursor()
 
@@ -452,17 +460,17 @@ def cleanup_duplicate_matches() -> int:
 
     groups = defaultdict(list)
     for r in rows:
-        d = (r["datetime"] or "")[:10]
         ch = canonical_name(r["home"])
         ca = canonical_name(r["away"])
-        key = (d, ch, ca)
+        key = tuple(sorted([ch, ca]))  # team pair only - same teams don't play twice
         groups[key].append(dict(r))
 
-    to_delete = []
+    deleted = 0
     for key, items in groups.items():
         if len(items) <= 1:
             continue
-        # prefer final result
+
+        # Choose best: prefer has final result
         best = None
         for it in items:
             cur.execute("SELECT 1 FROM match_results WHERE match_id = ? AND is_final=1 LIMIT 1", (it["id"],))
@@ -470,22 +478,46 @@ def cleanup_duplicate_matches() -> int:
                 best = it
                 break
         if not best:
+            # Prefer English name (from JSON)
+            for it in items:
+                if it["home"][0].isupper() and " " not in it.get("home", ""):  # rough English
+                    best = it
+                    break
+        if not best:
             best = min(items, key=lambda x: x["id"])
-        best_id = best["id"]
-        for it in items:
-            if it["id"] != best_id:
-                to_delete.append(it["id"])
 
-    if to_delete:
-        cur.executemany("DELETE FROM matches WHERE id = ?", [(d,) for d in to_delete])
-        # also clean orphaned predictions/results
-        cur.executemany("DELETE FROM predictions WHERE match_id = ?", [(d,) for d in to_delete])
-        cur.executemany("DELETE FROM match_results WHERE match_id = ?", [(d,) for d in to_delete])
-    deleted = len(to_delete)
+        best_id = best["id"]
+
+        for it in items:
+            if it["id"] == best_id:
+                continue
+            dup_id = it["id"]
+
+            # Migrate predictions to best
+            cur.execute("""
+                INSERT OR REPLACE INTO predictions (user, match_id, home_goals, away_goals)
+                SELECT user, ?, home_goals, away_goals FROM predictions WHERE match_id = ?
+            """, (best_id, dup_id))
+
+            # Migrate results (prefer final)
+            cur.execute("SELECT home_goals, away_goals, is_final FROM match_results WHERE match_id = ?", (dup_id,))
+            res = cur.fetchone()
+            if res:
+                cur.execute("""
+                    INSERT OR REPLACE INTO match_results (match_id, home_goals, away_goals, is_final)
+                    VALUES (?, ?, ?, ?)
+                """, (best_id, res[0], res[1], res[2]))
+
+            # Delete from dup
+            cur.execute("DELETE FROM predictions WHERE match_id = ?", (dup_id,))
+            cur.execute("DELETE FROM match_results WHERE match_id = ?", (dup_id,))
+            cur.execute("DELETE FROM matches WHERE id = ?", (dup_id,))
+            deleted += 1
+
     conn.commit()
     conn.close()
     if deleted > 0:
-        print(f"[CLEANUP] Removed {deleted} duplicate match rows")
+        print(f"[CLEANUP] Removed {deleted} duplicate match rows (data migrated)")
     return deleted
 
 
@@ -639,20 +671,14 @@ def save_prediction(p: PredictionCreate):
     if p.user not in USERS:
         raise HTTPException(400, "Ogiltig användare")
 
-    # Check if predictions are locked for this match
+    # Lock only if a final result has been set for the match.
+    # This allows recording bets in afterhand as long as no official result is entered.
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT datetime FROM matches WHERE id = ?", (p.match_id,))
-    row = cur.fetchone()
-    if row:
-        try:
-            match_dt = datetime.fromisoformat(row["datetime"])
-            if match_dt.tzinfo is None:
-                match_dt = match_dt.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) >= match_dt:
-                raise HTTPException(403, "Tippning är stängd – matchen har startat")
-        except Exception:
-            pass
+    cur.execute("SELECT 1 FROM match_results WHERE match_id = ? AND is_final = 1 LIMIT 1", (p.match_id,))
+    has_final_result = cur.fetchone() is not None
+    if has_final_result:
+        raise HTTPException(403, "Tippning är stängd – resultatet är redan inmatat")
 
     cur.execute(
         """INSERT OR REPLACE INTO predictions 
