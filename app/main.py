@@ -12,6 +12,7 @@ from collections import defaultdict
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List
+import re
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -314,6 +315,18 @@ def canonical_name(name: str) -> str:
     return TEAM_ALIASES.get(key, key)
 
 
+def is_placeholder_team(name: str) -> bool:
+    """Detects bracket placeholders like '1A', '2B', '2F', 'W73', 'L89' etc."""
+    if not name:
+        return False
+    n = str(name).strip().upper()
+    if re.match(r"^[0-9][A-Z]$", n):
+        return True
+    if re.match(r"^[WL][0-9]{1,3}$", n):
+        return True
+    return False
+
+
 def parse_match_kickoff_utc(date_str: str, time_str: str) -> str:
     """Parse '2026-06-13' + '12:00 UTC-7' into UTC ISO string (naive UTC)."""
     if not date_str:
@@ -363,18 +376,29 @@ async def sync_results_from_openfootball() -> int:
     conn = get_db()
     cur = conn.cursor()
 
-    # Load existing matches with canonical keys for robust dedup (handles Swedish/English/& vs and)
-    # Use team pair only (no date) because same two teams don't play twice in the tournament.
-    # Prefer the highest id for a key as the "primary" so that we consistently target the same survivor
-    # row for updates/results. Cleanup at end (and start) will remove the rest and migrate data/bets.
-    cur.execute("SELECT id, datetime, home, away FROM matches")
+    # Load existing matches.
+    # Primary key: canonical team pair (for normal matches).
+    # We also track by (date, stage/round) so that when the source "fills in" placeholders
+    # (e.g. "2A" vs "2B" becomes "South Africa" vs "Canada" for the same Round of 32 slot),
+    # we UPDATE the existing DB row instead of inserting a duplicate.
+    # This stops the weird mixed placeholder + real matches in the schedule.
+    cur.execute("SELECT id, datetime, home, away, stage FROM matches")
     existing = {}
+    slot_to_ids = defaultdict(list)  # (date, stage) -> info for legacy placeholder resolution
     for row in cur.fetchall():
         ch = canonical_name(row["home"])
         ca = canonical_name(row["away"])
-        key = tuple(sorted([ch, ca]))
-        if key not in existing or row["id"] > existing[key]:
-            existing[key] = row["id"]
+        tkey = tuple(sorted([ch, ca]))
+        if tkey not in existing or row["id"] > existing[tkey]:
+            existing[tkey] = row["id"]
+
+        d = (row["datetime"] or "")[:10]
+        st = row["stage"] or ""
+        slot_to_ids[(d, st)].append({
+            "id": row["id"],
+            "home": row["home"],
+            "away": row["away"]
+        })
 
     for r in remote_matches:
         r_date = r.get("date", "")
@@ -388,19 +412,37 @@ async def sync_results_from_openfootball() -> int:
         away = r.get("team2", "")
         ch = canonical_name(home)
         ca = canonical_name(away)
-        key = tuple(sorted([ch, ca]))
+        tkey = tuple(sorted([ch, ca]))
 
-        if key in existing:
-            mid = existing[key]
-            # update time/stage and ensure canonical English names from JSON
+        slot = (r_date, stage)
+
+        mid = None
+        if tkey in existing:
+            mid = existing[tkey]
+        else:
+            # Fallback for when source updates a slot from placeholder (e.g. "2A"–"2B" or "1C"–"2F" or "Brazil"–"2F")
+            # to real teams. Reuse the previous row for that date+round instead of creating a new one.
+            # This keeps the schedule clean and preserves any old bets on the row.
+            cands = slot_to_ids.get(slot, [])
+            for c in cands:
+                if is_placeholder_team(c["home"]) or is_placeholder_team(c["away"]):
+                    mid = c["id"]
+                    break
+            if mid is None and cands:
+                # No placeholder but same slot existed (e.g. partial fills) – reuse to avoid dups
+                mid = min((c["id"] for c in cands), default=None)
+
+        if mid is not None:
+            # Update the row (name change from placeholder -> real is the key case)
             cur.execute("UPDATE matches SET datetime = ?, stage = ?, home = ?, away = ? WHERE id = ?", (dt_str, stage, home, away, mid))
+            existing[tkey] = mid
         else:
             cur.execute("""
                 INSERT INTO matches (datetime, home, away, stage)
                 VALUES (?, ?, ?, ?)
             """, (dt_str, home, away, stage))
             mid = cur.lastrowid
-            existing[key] = mid
+            existing[tkey] = mid
             added_matches += 1
 
         # Parse and upsert result if present
@@ -434,6 +476,27 @@ async def sync_results_from_openfootball() -> int:
                     (mid, new_h, new_a)
                 )
                 updated_results += 1
+
+    # Purge any remaining pure-placeholder rows (e.g. "2A–2B", "1C–2F") for slots that now have real teams.
+    # This cleans up historical dups from before the slot-aware update logic.
+    cur.execute("SELECT id, datetime, home, away, stage FROM matches")
+    current_rows = cur.fetchall()
+    slots_have_real = set()
+    ph_ids = []
+    for r in current_rows:
+        d = (r["datetime"] or "")[:10]
+        st = r["stage"] or ""
+        is_ph = is_placeholder_team(r["home"]) or is_placeholder_team(r["away"])
+        if not is_ph:
+            slots_have_real.add((d, st))
+        elif (d, st) in slots_have_real:
+            ph_ids.append(r["id"])
+    for pid in ph_ids:
+        cur.execute("DELETE FROM predictions WHERE match_id = ?", (pid,))
+        cur.execute("DELETE FROM match_results WHERE match_id = ?", (pid,))
+        cur.execute("DELETE FROM matches WHERE id = ?", (pid,))
+    if ph_ids:
+        print(f"[SYNC] Purged {len(ph_ids)} stale placeholder match rows for resolved slots")
 
     conn.commit()
     conn.close()
